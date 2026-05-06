@@ -87,6 +87,13 @@ const callIdToEventId = new Map();
 // (including the AI-generated summary, e.g. "Get Latest Versions") to
 // `<workspacePath>/workspace.yaml`. We read that file directly. Polled cheaply
 // on every tool call and prompt; pushed to the page only when it changes.
+//
+// Note: `session` itself is a `const` assigned later via `await joinSession()`.
+// Touching it via `typeof` does NOT suppress the temporal dead zone for `let`/
+// `const` bindings — it would still throw `ReferenceError`. We use a separate
+// `sessionRef` mutable reference set right after joinSession resolves so this
+// snapshot can be safely called by an RPC that fires before then.
+let sessionRef = null;
 let lastSessionInfo = null;
 
 function readWorkspaceSummary(workspacePath) {
@@ -99,6 +106,13 @@ function readWorkspaceSummary(workspacePath) {
         const m = yaml.match(/^summary:\s*(.*)$/m);
         if (!m) return null;
         let val = m[1].trim();
+        // YAML block scalar indicators (`|`, `>`, optionally with chomping
+        // `-`/`+` or an explicit indentation digit) put the actual value on
+        // subsequent indented lines. A real YAML parse would follow the
+        // continuation; for our needs, treating those as "no usable summary"
+        // and falling back to the GUID is good enough — the host writes plain
+        // scalars in practice and this just guards against a future change.
+        if (/^[|>][-+]?\d*$/.test(val)) return null;
         // Strip surrounding quotes if the host happened to quote it.
         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
@@ -110,10 +124,10 @@ function readWorkspaceSummary(workspacePath) {
 }
 
 function snapshotSessionInfo() {
-    if (typeof session === "undefined" || !session) return null;
+    if (!sessionRef) return null;
     return {
-        sessionId: session.sessionId,
-        summary: readWorkspaceSummary(session._workspacePath),
+        sessionId: sessionRef.sessionId,
+        summary: readWorkspaceSummary(sessionRef._workspacePath),
     };
 }
 
@@ -284,6 +298,7 @@ const session = await joinSession({
 
 // Initial snapshot now that `session` exists, so getSessionInfo() returns
 // real data the moment the page connects (no need to wait for a tool call).
+sessionRef = session;
 pollSessionInfo();
 
 // Announce that the extension has finished loading. Doing this after
