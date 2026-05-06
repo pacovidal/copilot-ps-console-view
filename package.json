@@ -1,0 +1,20 @@
+{
+  "name": "copilot-ps-console-view",
+  "version": "0.1.0",
+  "description": "Copilot CLI extension that opens a webview showing all PowerShell commands run by the agent and their output, console-style.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Paco Vidal",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pacovidal/copilot-ps-console-view.git"
+  },
+  "dependencies": {
+    "@webviewjs/webview": "^0.1.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
