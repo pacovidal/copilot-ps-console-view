@@ -1,0 +1,36 @@
+/* Solarized Light — Ethan Schoonover's classic palette, light variant.
+   See https://ethanschoonover.com/solarized/ */
+:root {
+    --bg:               #fdf6e3;
+    --bg-header:        #eee8d5;
+    --bg-button:        #eee8d5;
+    --bg-button-hover:  #d8d2c0;
+    --bg-cmd:           #eee8d5;
+    --bg-result:        #fdf6e3;
+    --bg-menu:          #eee8d5;
+    --bg-menu-hover:    #268bd2;
+    --bg-status:        #93a1a1;
+    --bg-hover-row:     rgba(0, 0, 0, 0.04);
+
+    --fg:               #657b83;
+    --fg-strong:        #586e75;
+    --fg-dim:           #93a1a1;
+    --fg-meta:          #859900;
+    --fg-status:        #fdf6e3;
+    --fg-cmd:           #586e75;
+    --fg-desc:          #657b83;
+
+    --accent-status:    #859900;
+    --accent-tool:      #d33682;
+    --accent-header:    #268bd2;
+    --accent-cmd:       #268bd2;
+    --accent-success:   #859900;
+    --accent-failure:   #dc322f;
+    --accent-warn:      #b58900;
+
+    --border:           #eee8d5;
+    --border-button:    #93a1a1;
+    --border-menu:      #93a1a1;
+
+    --shadow-menu:      0 4px 12px rgba(0, 0, 0, 0.15);
+}

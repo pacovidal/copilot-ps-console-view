@@ -1,0 +1,36 @@
+/* Solarized Dark — Ethan Schoonover's classic palette.
+   See https://ethanschoonover.com/solarized/ */
+:root {
+    --bg:               #002b36;
+    --bg-header:        #073642;
+    --bg-button:        #073642;
+    --bg-button-hover:  #586e75;
+    --bg-cmd:           #073642;
+    --bg-result:        #002b36;
+    --bg-menu:          #073642;
+    --bg-menu-hover:    #268bd2;
+    --bg-status:        #586e75;
+    --bg-hover-row:     rgba(255, 255, 255, 0.04);
+
+    --fg:               #839496;
+    --fg-strong:        #93a1a1;
+    --fg-dim:           #586e75;
+    --fg-meta:          #859900;
+    --fg-status:        #fdf6e3;
+    --fg-cmd:           #93a1a1;
+    --fg-desc:          #839496;
+
+    --accent-status:    #859900;
+    --accent-tool:      #d33682;
+    --accent-header:    #268bd2;
+    --accent-cmd:       #268bd2;
+    --accent-success:   #859900;
+    --accent-failure:   #dc322f;
+    --accent-warn:      #b58900;
+
+    --border:           #073642;
+    --border-button:    #586e75;
+    --border-menu:      #586e75;
+
+    --shadow-menu:      0 4px 12px rgba(0, 0, 0, 0.5);
+}

@@ -1,0 +1,52 @@
+/* Default Dark theme — the visual baseline. Matches the original style.css
+   colors byte-for-byte. Always linked as the fallback layer in index.html so
+   variables resolve even before main.js fills the <style id="active-theme">
+   override tag.
+
+   Variable contract:
+     Backgrounds:     --bg, --bg-header, --bg-button, --bg-button-hover,
+                      --bg-cmd, --bg-result, --bg-menu, --bg-menu-hover,
+                      --bg-status, --bg-hover-row
+     Foregrounds:     --fg, --fg-strong, --fg-dim, --fg-meta, --fg-status,
+                      --fg-cmd, --fg-desc
+     Accents:         --accent-status (live dot), --accent-tool,
+                      --accent-header, --accent-cmd, --accent-success,
+                      --accent-failure, --accent-warn
+     Borders:         --border, --border-button, --border-menu
+     Effects:         --shadow-menu
+
+   See content/themes/README.md for descriptions and authoring guidance. */
+:root {
+    --bg:               #0c0c0c;
+    --bg-header:        #1f1f1f;
+    --bg-button:        #2d2d2d;
+    --bg-button-hover:  #3a3a3a;
+    --bg-cmd:           #1e1e1e;
+    --bg-result:        #161616;
+    --bg-menu:          #252526;
+    --bg-menu-hover:    #094771;
+    --bg-status:        #007acc;
+    --bg-hover-row:     rgba(255, 255, 255, 0.04);
+
+    --fg:               #cccccc;
+    --fg-strong:        #e6e6e6;
+    --fg-dim:           #6a6a6a;
+    --fg-meta:          #6a9955;
+    --fg-status:        #ffffff;
+    --fg-cmd:           #dcdcdc;
+    --fg-desc:          #d4d4d4;
+
+    --accent-status:    #16c60c;
+    --accent-tool:      #c586c0;
+    --accent-header:    #9cdcfe;
+    --accent-cmd:       #569cd6;
+    --accent-success:   #6a9955;
+    --accent-failure:   #f48771;
+    --accent-warn:      #dcdcaa;
+
+    --border:           #2d2d2d;
+    --border-button:    #3c3c3c;
+    --border-menu:      #454545;
+
+    --shadow-menu:      0 4px 12px rgba(0, 0, 0, 0.5);
+}

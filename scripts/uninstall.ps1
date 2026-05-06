@@ -36,6 +36,18 @@ if (-not (Test-Path $target)) {
     exit 0
 }
 
+# User themes live in <target>\themes\ (built-in themes live under content\themes\).
+# Warn before they go — uninstall is destructive on purpose, but the user may
+# want to copy them out first.
+$userThemes = Join-Path $target 'themes'
+if (Test-Path $userThemes) {
+    $count = @(Get-ChildItem -LiteralPath $userThemes -File -Filter '*.css' -ErrorAction SilentlyContinue).Count
+    if ($count -gt 0) {
+        Write-Host "Note: $count user theme file(s) in $userThemes will also be removed." -ForegroundColor Yellow
+        Write-Host "      Copy them out now if you want to keep them." -ForegroundColor Yellow
+    }
+}
+
 Write-Host "Removing $target ..." -ForegroundColor Cyan
 Remove-Item -Recurse -Force $target
 Write-Host "✅ Uninstalled." -ForegroundColor Green

@@ -126,6 +126,41 @@ function Test-Command($name) {
     return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
+function Save-UserThemes {
+    # Move <Target>\themes\ to a temp path before the existing tree is wiped,
+    # so user-authored theme files survive an upgrade. Returns the backup path
+    # (or $null if nothing was backed up). Pair with Restore-UserThemes.
+    param([string]$Target)
+    $themes = Join-Path $Target 'themes'
+    if (-not (Test-Path $themes)) { return $null }
+    $backup = Join-Path $env:TEMP "$ExtensionDirName-themes-$([guid]::NewGuid())"
+    Write-Step "Preserving user themes from $themes"
+    Move-Item -LiteralPath $themes -Destination $backup
+    Write-Ok "Backed up to $backup"
+    return $backup
+}
+
+function Restore-UserThemes {
+    # Move themes back into <Target>\themes\ after the new tree is in place.
+    # If the new tree shipped its own themes\ folder, *user* themes win on
+    # name collisions (so a user override of a built-in stays in effect).
+    # No-op if $Backup is $null.
+    param([string]$Target, [string]$Backup)
+    if (-not $Backup) { return }
+    if (-not (Test-Path $Backup)) { return }
+    $themes = Join-Path $Target 'themes'
+    if (-not (Test-Path $themes)) {
+        Move-Item -LiteralPath $Backup -Destination $themes
+    } else {
+        Write-Step "Restoring user themes into $themes"
+        # Recursive copy preserves any subdirectories the user might have
+        # created under themes/ (e.g. for organizing personal palettes).
+        Copy-Item -LiteralPath (Join-Path $Backup '*') -Destination $themes -Recurse -Force
+        Remove-Item -Recurse -Force $Backup -ErrorAction SilentlyContinue
+    }
+    Write-Ok "User themes restored."
+}
+
 function Resolve-LocalCheckout {
     # The script lives in <repoRoot>\scripts\install.ps1 — repoRoot is its parent.
     $candidate = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -248,25 +283,45 @@ if ($FromGitHub) {
     Write-Step "Source: local working tree ($localCheckout)"
 }
 
+# Back up user themes BEFORE the destructive section so they can be rescued
+# even if the install path itself fails partway through.
+$themesBackup = $null
 if (Test-Path $target) {
     if (-not $Force) {
         throw "Target already exists: $target. Pass -Force to overwrite, or run uninstall.ps1 first."
     }
     Write-Warn2 "Removing existing install (-Force)."
-    Remove-Item -Recurse -Force $target
+    $themesBackup = Save-UserThemes -Target $target
 }
 
-New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
-
-if ($FromGitHub) {
-    if (Test-Command git) {
-        Install-FromGit  -Url $RepoUrl -Ref $Ref -Target $target
-    } else {
-        Write-Warn2 "git not found on PATH; falling back to tarball download."
-        Install-FromTarball -Url $RepoUrl -Ref $Ref -Target $target
+try {
+    if (Test-Path $target) {
+        Remove-Item -Recurse -Force $target
     }
-} else {
-    Install-FromLocal -Source $localCheckout -Target $target
+
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+
+    if ($FromGitHub) {
+        if (Test-Command git) {
+            Install-FromGit  -Url $RepoUrl -Ref $Ref -Target $target
+        } else {
+            Write-Warn2 "git not found on PATH; falling back to tarball download."
+            Install-FromTarball -Url $RepoUrl -Ref $Ref -Target $target
+        }
+    } else {
+        Install-FromLocal -Source $localCheckout -Target $target
+    }
+
+    Restore-UserThemes -Target $target -Backup $themesBackup
+    # Restored successfully; cancel the finally-block recovery hint.
+    $themesBackup = $null
+} finally {
+    if ($themesBackup -and (Test-Path $themesBackup)) {
+        Write-Warn2 ""
+        Write-Warn2 "Install did not complete. Your user themes are preserved at:"
+        Write-Warn2 "  $themesBackup"
+        Write-Warn2 "Move them back into '$target\themes\' once you've recovered the install."
+    }
 }
 
 Write-Step "Installing Node dependencies (npm install)"

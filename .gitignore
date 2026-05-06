@@ -1,6 +1,11 @@
 node_modules/
 package-lock.json
 
+# User themes directory (created at runtime when this checkout is symlinked as
+# the installed extension, e.g. via `New-Item -ItemType Junction`). Built-in
+# themes live in content/themes/ and ARE tracked.
+/themes/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

@@ -127,6 +127,25 @@ The extension also registers three tools the agent can use directly:
 - `ps_console_view_eval` — run JS inside the page
 - `ps_console_view_close` — close the window
 
+## Themes
+
+The console ships with seven built-in colour schemes (default-dark,
+default-light, solarized-dark, solarized-light, campbell, one-half-dark,
+tango-dark) and picks `default-light` or `default-dark` on first run based
+on your OS appearance preference.
+
+Switch themes via the right-click context menu → **Theme ▸**. Your choice
+is remembered across sessions.
+
+To add your own theme, drop a `.css` file into:
+
+- `<extension-install-dir>\themes\` (default; preserved across upgrades), or
+- the directory pointed at by `$env:COPILOT_PS_CONSOLE_THEMES_DIR`.
+
+Reopening the Theme submenu picks up new files automatically. See
+[`content/themes/README.md`](content/themes/README.md) for the variable
+reference and a copy-pastable starter template.
+
 ## Uninstall
 
 ```powershell
@@ -166,6 +185,7 @@ copilot-ps-console-view/
 ├── main.mjs              # joinSession, hooks, callbacks
 ├── lib/                  # generic copilot-webview library (verbatim)
 ├── content/              # the webview page
+│   └── themes/           # built-in themes + author guide
 ├── scripts/              # install.ps1, uninstall.ps1
 ├── package.json
 ├── LICENSE               # MIT

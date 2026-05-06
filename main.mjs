@@ -3,6 +3,7 @@
 // them, with their results, into a console-like webview window.
 import { joinSession } from "@github/copilot-sdk/extension";
 import { join } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { CopilotWebview } from "./lib/copilot-webview.js";
 
 const PS_TOOLS = new Set([
@@ -12,6 +13,63 @@ const PS_TOOLS = new Set([
     "stop_powershell",
     "list_powershell",
 ]);
+
+// Theme directories. Built-in themes ship with the extension; user themes live
+// in a separate directory the extension's installer preserves across upgrades.
+// The env var override exists for users who want their themes in a dotfiles
+// repo or shared location.
+const themesBuiltinDir = join(import.meta.dirname, "content", "themes");
+const themesUserDir = process.env.COPILOT_PS_CONSOLE_THEMES_DIR
+    || join(import.meta.dirname, "themes");
+// State file: { name: "<theme-name>", mode: "light" | "dark" | "system" }.
+// Lives inside the user themes dir so the installer's preserve-themes step
+// rescues it on upgrade. `name` is read on page load to restore the user's
+// last theme choice (the webview's per-window WEBVIEW2_USER_DATA_FOLDER is
+// wiped on close, so localStorage is not durable). `mode` is used to set the
+// *native* window theme (titlebar, native chrome) on the next window open.
+const themeStateFile = join(themesUserDir, ".state.json");
+
+function readThemeState() {
+    try { return JSON.parse(readFileSync(themeStateFile, "utf8")); }
+    catch { return {}; }
+}
+
+function writeThemeState(state) {
+    try {
+        mkdirSync(themesUserDir, { recursive: true });
+        writeFileSync(themeStateFile, JSON.stringify(state, null, 2));
+    } catch {
+        // Best-effort. If the dir is read-only the user gets the page-side
+        // theme; only the next-open native chrome won't follow.
+    }
+}
+
+// Scan built-in then user themes; user files of the same name override builtins.
+// Re-scans on every call — drop a .css file in themesUserDir, reopen the picker
+// menu, and it appears. Returns: [{name, source: "builtin"|"user", css}]
+function listThemesImpl() {
+    const map = new Map();
+    const scan = (dir, source) => {
+        let entries;
+        try { entries = readdirSync(dir); }
+        catch { return; }
+        for (const name of entries) {
+            if (!name.toLowerCase().endsWith(".css")) continue;
+            const abs = join(dir, name);
+            try {
+                if (!statSync(abs).isFile()) continue;
+                const css = readFileSync(abs, "utf8");
+                const key = name.slice(0, -4);
+                map.set(key, { name: key, source, css });
+            } catch {
+                // Skip files we can't read.
+            }
+        }
+    };
+    scan(themesBuiltinDir, "builtin");
+    scan(themesUserDir, "user");
+    return [...map.values()];
+}
 
 // In-memory ring buffer of recent events so the page can replay history when
 // it (re)connects, and so events that arrive before the window opens are not
@@ -88,6 +146,7 @@ const webview = new CopilotWebview({
     width: 1100,
     height: 700,
     iconPath: join(import.meta.dirname, "content", "terminal-copilot.rgba"),
+    theme: readThemeState().mode || "system",
     callbacks: {
         // Page asks for the full backlog when it (re)connects.
         getHistory: () => history,
@@ -95,6 +154,26 @@ const webview = new CopilotWebview({
         clearHistory: () => {
             history.length = 0;
             return true;
+        },
+        // Returns built-in + user themes. Re-scans on every call.
+        listThemes: () => listThemesImpl(),
+        // Returns the persisted theme name (or null if none). Page calls this
+        // on startup before falling back to prefers-color-scheme.
+        getInitialTheme: () => readThemeState().name || null,
+        // Page calls this whenever the user picks a theme. We persist {name,
+        // mode}: name so the choice survives across window reopens (the
+        // webview's localStorage is per-window-instance, not durable); mode
+        // so the next-open native chrome (Win11 titlebar) follows. Also
+        // updates the in-memory webview.theme so a subsequent show() from
+        // the same session uses the right native theme. Native chrome
+        // cannot be changed for an already-open window.
+        setThemeChoice: (choice) => {
+            const c = choice && typeof choice === "object" ? choice : {};
+            const name = typeof c.name === "string" ? c.name : null;
+            const mode = c.mode === "light" || c.mode === "dark" ? c.mode : "system";
+            writeThemeState({ name, mode });
+            webview.setTheme(mode);
+            return { name, mode };
         },
         log: (msg, opts) => session.log(msg, opts),
     },

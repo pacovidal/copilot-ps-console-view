@@ -4,6 +4,7 @@
 const consoleEl = document.getElementById("console");
 const statusEl = document.getElementById("status");
 const clearBtn = document.getElementById("clear");
+const activeStyleEl = document.getElementById("active-theme");
 
 const seenIds = new Set();
 let lastSeenId = 0;
@@ -18,6 +19,81 @@ const opts = {
 };
 // Apply non-default initial state to the DOM on load.
 consoleEl.classList.toggle("wrap", opts.wrap);
+
+// --- Theme machinery -------------------------------------------------------
+// A theme is a plain CSS file containing one :root {} rule that defines all
+// colour variables (and optionally other properties — themes are full CSS).
+// The active theme's CSS is always injected into <style id="active-theme">,
+// even for default-dark. The static <link> for default-dark in index.html
+// is a first-paint fallback only — it would otherwise prevent users from
+// overriding default-dark with their own themes/default-dark.css.
+const BUILTIN_ORDER = ["default-dark", "default-light", "solarized-dark", "solarized-light", "campbell", "one-half-dark", "tango-dark"];
+let themesCache = null;
+let activeThemeName = null;
+
+function parseColor(s) {
+    s = s.trim();
+    if (s.startsWith("#")) {
+        const h = s.slice(1);
+        if (h.length === 3) return [0, 1, 2].map((i) => parseInt(h[i] + h[i], 16));
+        if (h.length === 6) return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    }
+    const m = s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (m) return [+m[1], +m[2], +m[3]];
+    return null;
+}
+
+// Sniff a theme's light/dark mode from its --bg value (relative luminance).
+// Used to set the native window chrome on next reopen — page CSS is unaffected.
+function classifyMode(css) {
+    const m = css && css.match(/--bg\s*:\s*([^;]+);/);
+    if (!m) return "dark";
+    const rgb = parseColor(m[1]);
+    if (!rgb) return "dark";
+    const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+    return lum > 0.5 ? "light" : "dark";
+}
+
+async function ensureThemes() {
+    if (themesCache) return themesCache;
+    return refreshThemes();
+}
+
+async function refreshThemes() {
+    try { themesCache = await copilot.listThemes(); }
+    catch { themesCache = []; }
+    return themesCache;
+}
+
+function applyTheme(name, css) {
+    // Always inject the picked theme's CSS — including built-ins. The static
+    // <link rel="stylesheet" href="themes/default-dark.css"> in index.html is
+    // a first-paint fallback only; it's NOT authoritative because a user who
+    // drops their own themes/default-dark.css must be able to override it.
+    activeStyleEl.textContent = css || "";
+    activeThemeName = name;
+    const mode = classifyMode(css);
+    // Persist {name, mode} server-side. localStorage isn't durable here: the
+    // webview uses a per-window WEBVIEW2_USER_DATA_FOLDER that's wiped on
+    // close, so localStorage evaporates with each window. The extension
+    // process owns persistence.
+    copilot.setThemeChoice({ name, mode }).catch(() => {});
+}
+
+async function initTheme() {
+    const themes = await ensureThemes();
+    let persistedName = null;
+    try { persistedName = await copilot.getInitialTheme(); } catch {}
+    let pick = persistedName ? themes.find((t) => t.name === persistedName) : null;
+    if (!pick) {
+        // First run (or persisted theme has been deleted) — pick a default
+        // matching the OS color scheme preference.
+        const prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+        const wanted = prefersLight ? "default-light" : "default-dark";
+        pick = themes.find((t) => t.name === wanted) || themes.find((t) => t.name === "default-dark");
+    }
+    if (pick) applyTheme(pick.name, pick.css);
+}
 
 function fmtTime(ts) {
     const d = new Date(ts);
@@ -147,13 +223,21 @@ function append(ev) {
 
 window.psConsole = { append };
 
-// Right-click context menu. Two groups separated by a divider:
+// Right-click context menu. Three groups separated by dividers:
 //   1. Per-entry actions (collapse all / expand all)
 //   2. Sticky toggles (auto-scroll, wrap, expand-new), formerly header checkboxes.
+//   3. Theme submenu (built-in + user themes; user themes override builtins of
+//      the same name). Lives in a sibling div positioned next to the trigger.
 const contextMenu = document.createElement("div");
 contextMenu.id = "context-menu";
 contextMenu.hidden = true;
 document.body.appendChild(contextMenu);
+
+const themeSubmenu = document.createElement("div");
+themeSubmenu.id = "theme-submenu";
+themeSubmenu.classList.add("submenu");
+themeSubmenu.hidden = true;
+document.body.appendChild(themeSubmenu);
 
 const TOGGLES = [
     { key: "autoscroll", label: "Auto-scroll", apply: () => {} },
@@ -166,7 +250,11 @@ function renderContextMenu() {
     const add = (action, label, opts2 = {}) => {
         const btn = document.createElement("button");
         btn.dataset.action = action;
-        btn.textContent = (opts2.checked ? "✓ " : "  ") + label;
+        if (opts2.html) {
+            btn.innerHTML = (opts2.checked ? "✓ " : "  ") + label;
+        } else {
+            btn.textContent = (opts2.checked ? "✓ " : "  ") + label;
+        }
         contextMenu.appendChild(btn);
     };
     add("collapse-all", "Collapse all");
@@ -177,6 +265,60 @@ function renderContextMenu() {
     for (const t of TOGGLES) {
         add(`toggle:${t.key}`, t.label, { checked: opts[t.key] });
     }
+    const sep2 = document.createElement("div");
+    sep2.className = "separator";
+    contextMenu.appendChild(sep2);
+    add("theme", `Theme<span class="submenu-arrow">▸</span>`, { html: true });
+}
+
+function renderThemeSubmenu(themes) {
+    themeSubmenu.innerHTML = "";
+    const builtinIndex = (name) => {
+        const i = BUILTIN_ORDER.indexOf(name);
+        return i === -1 ? 1e9 : i;
+    };
+    const builtins = themes
+        .filter((t) => t.source === "builtin")
+        .sort((a, b) => builtinIndex(a.name) - builtinIndex(b.name) || a.name.localeCompare(b.name));
+    const userThemes = themes
+        .filter((t) => t.source === "user")
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    const add = (theme) => {
+        const btn = document.createElement("button");
+        btn.dataset.theme = theme.name;
+        const checked = theme.name === activeThemeName;
+        btn.textContent = (checked ? "✓ " : "  ") + theme.name;
+        themeSubmenu.appendChild(btn);
+    };
+    for (const t of builtins) add(t);
+    if (userThemes.length) {
+        const sep = document.createElement("div");
+        sep.className = "separator";
+        themeSubmenu.appendChild(sep);
+        for (const t of userThemes) add(t);
+    }
+    if (!builtins.length && !userThemes.length) {
+        const empty = document.createElement("div");
+        empty.className = "separator";
+        themeSubmenu.appendChild(empty);
+        const note = document.createElement("button");
+        note.disabled = true;
+        note.textContent = "  (no themes found)";
+        themeSubmenu.appendChild(note);
+    }
+}
+
+function showThemeSubmenu(anchorRect) {
+    themeSubmenu.hidden = false;
+    const { innerWidth: w, innerHeight: h } = window;
+    let left = anchorRect.right;
+    let top = anchorRect.top;
+    if (left + themeSubmenu.offsetWidth > w - 4) left = anchorRect.left - themeSubmenu.offsetWidth;
+    if (top + themeSubmenu.offsetHeight > h - 4) top = h - themeSubmenu.offsetHeight - 4;
+    if (top < 4) top = 4;
+    themeSubmenu.style.left = `${Math.max(0, left)}px`;
+    themeSubmenu.style.top = `${top}px`;
 }
 
 function setAllCollapsed(collapsed) {
@@ -187,12 +329,15 @@ function setAllCollapsed(collapsed) {
 
 function hideContextMenu() {
     contextMenu.hidden = true;
+    themeSubmenu.hidden = true;
 }
+function hideThemeSubmenu() { themeSubmenu.hidden = true; }
 
 consoleEl.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     renderContextMenu();
     contextMenu.hidden = false;
+    hideThemeSubmenu();
     // Position; clamp inside the viewport.
     const { innerWidth: w, innerHeight: h } = window;
     const { offsetWidth: mw, offsetHeight: mh } = contextMenu;
@@ -200,11 +345,24 @@ consoleEl.addEventListener("contextmenu", (e) => {
     contextMenu.style.top = `${Math.min(e.clientY, h - mh - 4)}px`;
 });
 
-contextMenu.addEventListener("click", (e) => {
-    const action = e.target?.dataset?.action;
+contextMenu.addEventListener("click", async (e) => {
+    const btn = e.target?.closest?.("button");
+    const action = btn?.dataset?.action;
     if (!action) return;
     if (action === "collapse-all") setAllCollapsed(true);
     else if (action === "expand-all") setAllCollapsed(false);
+    else if (action === "theme") {
+        // Toggle the theme submenu without dismissing the parent menu. Always
+        // re-fetch so newly-dropped user theme files appear immediately.
+        if (themeSubmenu.hidden) {
+            const themes = await refreshThemes();
+            renderThemeSubmenu(themes);
+            showThemeSubmenu(btn.getBoundingClientRect());
+        } else {
+            hideThemeSubmenu();
+        }
+        return;
+    }
     else if (action.startsWith("toggle:")) {
         const key = action.slice("toggle:".length);
         const t = TOGGLES.find((x) => x.key === key);
@@ -216,7 +374,19 @@ contextMenu.addEventListener("click", (e) => {
     hideContextMenu();
 });
 
-window.addEventListener("click", hideContextMenu);
+themeSubmenu.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("button");
+    const name = btn?.dataset?.theme;
+    if (!name) return;
+    const t = themesCache?.find((x) => x.name === name);
+    if (t) applyTheme(t.name, t.css);
+    hideContextMenu();
+});
+
+window.addEventListener("click", (e) => {
+    if (contextMenu.contains(e.target) || themeSubmenu.contains(e.target)) return;
+    hideContextMenu();
+});
 window.addEventListener("scroll", hideContextMenu, true);
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") hideContextMenu(); });
 
@@ -247,3 +417,4 @@ async function loadHistory() {
 
 showEmpty();
 loadHistory();
+initTheme();

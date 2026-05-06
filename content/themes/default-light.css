@@ -1,0 +1,37 @@
+/* Default Light — light variant of the default theme.
+   Preserves the same role mapping as default-dark with inverted backgrounds
+   and adjusted accents for AA contrast on a light surface. */
+:root {
+    --bg:               #fafafa;
+    --bg-header:        #ececec;
+    --bg-button:        #e1e1e1;
+    --bg-button-hover:  #d4d4d4;
+    --bg-cmd:           #f0f0f0;
+    --bg-result:        #f3f3f3;
+    --bg-menu:          #f4f4f4;
+    --bg-menu-hover:    #cce5ff;
+    --bg-status:        #007acc;
+    --bg-hover-row:     rgba(0, 0, 0, 0.04);
+
+    --fg:               #2e2e2e;
+    --fg-strong:        #1f1f1f;
+    --fg-dim:           #888888;
+    --fg-meta:          #2e7d32;
+    --fg-status:        #ffffff;
+    --fg-cmd:           #222222;
+    --fg-desc:          #444444;
+
+    --accent-status:    #16a116;
+    --accent-tool:      #a626a4;
+    --accent-header:    #0184bc;
+    --accent-cmd:       #0184bc;
+    --accent-success:   #2e7d32;
+    --accent-failure:   #c41e3a;
+    --accent-warn:      #b58900;
+
+    --border:           #d0d0d0;
+    --border-button:    #b8b8b8;
+    --border-menu:      #c8c8c8;
+
+    --shadow-menu:      0 4px 12px rgba(0, 0, 0, 0.15);
+}
