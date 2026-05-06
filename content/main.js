@@ -5,11 +5,16 @@ const consoleEl = document.getElementById("console");
 const statusEl = document.getElementById("status");
 const clearBtn = document.getElementById("clear");
 const activeStyleEl = document.getElementById("active-theme");
+const sessionInfoEl = document.getElementById("session-info");
 
 const seenIds = new Set();
 let lastSeenId = 0;
 let empty = true;
 let refilling = false;
+
+// Title used when the session has no summary yet (e.g. brand-new session
+// before Copilot has named it). Kept in sync with index.html's <title>.
+const DEFAULT_TITLE = "Copilot PowerShell Console";
 
 // View options (formerly checkboxes; now toggles in the right-click menu).
 const opts = {
@@ -221,7 +226,54 @@ function append(ev) {
     appendOne(ev);
 }
 
-window.psConsole = { append };
+window.psConsole = { append, setSessionInfo };
+
+// --- Session info ----------------------------------------------------------
+// Footer left side: "Session: 'Get Latest Versions'" (full GUID on hover).
+// Window title:     "Get Latest Versions — Copilot PowerShell Console".
+// Both updated whenever the extension polls and detects a summary change.
+function setSessionInfo(info) {
+    const summary = (info && typeof info.summary === "string" && info.summary) || null;
+    const sessionId = (info && typeof info.sessionId === "string" && info.sessionId) || null;
+
+    // Footer text — show the summary in quotes when present; otherwise show
+    // the GUID itself so the session is still identifiable. Tooltip always
+    // exposes the full GUID for unambiguous reference.
+    let footerText;
+    if (summary) {
+        footerText = `Session: '${summary}'`;
+    } else if (sessionId) {
+        footerText = `Session: ${sessionId}`;
+    } else {
+        footerText = "";
+    }
+    sessionInfoEl.textContent = footerText;
+    if (sessionId) {
+        sessionInfoEl.title = sessionId;
+    } else {
+        sessionInfoEl.removeAttribute("title");
+    }
+
+    // Window title — WebView2/wry doesn't reflect document.title to the native
+    // OS title bar automatically, so we also set it (best-effort, ignored if
+    // ipc isn't bridged) via the IPC channel handled in lib/webview-child.mjs.
+    const docTitle = summary ? `${summary} — ${DEFAULT_TITLE}` : DEFAULT_TITLE;
+    document.title = docTitle;
+    try {
+        if (window.ipc && typeof window.ipc.postMessage === "function") {
+            window.ipc.postMessage(JSON.stringify({ type: "setTitle", value: docTitle }));
+        }
+    } catch {}
+}
+
+async function loadSessionInfo() {
+    try {
+        const info = await copilot.getSessionInfo();
+        if (info) setSessionInfo(info);
+    } catch {
+        // Best-effort; older extension versions may not expose this RPC.
+    }
+}
 
 // Right-click context menu. Three groups separated by dividers:
 //   1. Per-entry actions (collapse all / expand all)
@@ -417,4 +469,5 @@ async function loadHistory() {
 
 showEmpty();
 loadHistory();
+loadSessionInfo();
 initTheme();

@@ -37,6 +37,22 @@ footer {
   background: var(--bg-status);
   color: var(--fg-status);
   font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+footer .session-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+footer .session-info:empty { display: none; }
+footer #status {
+  flex: 0 0 auto;
 }
 .entry { margin-bottom: 6px; }
 .entry .header-line {

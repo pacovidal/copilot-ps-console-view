@@ -80,6 +80,57 @@ let nextId = 1;
 // Map toolCallId -> event id, so post events can reference their pre event.
 const callIdToEventId = new Map();
 
+// --- Session info (footer + window title) ---------------------------------
+// Snapshot of the bits of session metadata the page cares about. The extension
+// SDK doesn't expose `summary` directly on the Session instance — it only gives
+// us `sessionId` and `_workspacePath`. The host CLI persists workspace metadata
+// (including the AI-generated summary, e.g. "Get Latest Versions") to
+// `<workspacePath>/workspace.yaml`. We read that file directly. Polled cheaply
+// on every tool call and prompt; pushed to the page only when it changes.
+let lastSessionInfo = null;
+
+function readWorkspaceSummary(workspacePath) {
+    if (!workspacePath || typeof workspacePath !== "string") return null;
+    try {
+        const yaml = readFileSync(join(workspacePath, "workspace.yaml"), "utf8");
+        // Tiny inline parse — we only need the top-level `summary:` line. Avoid
+        // pulling in a YAML dependency for one field. Matches: `summary: <text>`
+        // (unquoted scalar) since that's what the host writes.
+        const m = yaml.match(/^summary:\s*(.*)$/m);
+        if (!m) return null;
+        let val = m[1].trim();
+        // Strip surrounding quotes if the host happened to quote it.
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+        }
+        return val || null;
+    } catch {
+        return null;
+    }
+}
+
+function snapshotSessionInfo() {
+    if (typeof session === "undefined" || !session) return null;
+    return {
+        sessionId: session.sessionId,
+        summary: readWorkspaceSummary(session._workspacePath),
+    };
+}
+
+function pollSessionInfo() {
+    const info = snapshotSessionInfo();
+    if (!info) return;
+    if (lastSessionInfo
+        && lastSessionInfo.sessionId === info.sessionId
+        && lastSessionInfo.summary === info.summary) {
+        return;
+    }
+    lastSessionInfo = info;
+    webview
+        .eval(`window.psConsole && window.psConsole.setSessionInfo(${JSON.stringify(info)})`)
+        .catch(() => {});
+}
+
 function pushEvent(ev) {
     ev.id = nextId++;
     ev.timestamp = Date.now();
@@ -160,6 +211,10 @@ const webview = new CopilotWebview({
         // Returns the persisted theme name (or null if none). Page calls this
         // on startup before falling back to prefers-color-scheme.
         getInitialTheme: () => readThemeState().name || null,
+        // Returns {sessionId, summary}. Page calls this on first connect to
+        // populate the footer and window title; subsequent updates arrive via
+        // window.psConsole.setSessionInfo pushed by pollSessionInfo().
+        getSessionInfo: () => snapshotSessionInfo(),
         // Page calls this whenever the user picks a theme. We persist {name,
         // mode}: name so the choice survives across window reopens (the
         // webview's localStorage is per-window-instance, not durable); mode
@@ -192,6 +247,9 @@ const session = await joinSession({
     ],
     hooks: {
         onPreToolUse: async (input, invocation) => {
+            // Poll on every tool call regardless of which tool — the AI may
+            // regenerate the session summary after any turn, not just PS ones.
+            pollSessionInfo();
             if (!PS_TOOLS.has(input.toolName)) return;
             const ev = pushEvent({
                 kind: "call",
@@ -202,6 +260,7 @@ const session = await joinSession({
             if (invocation?.toolCallId) callIdToEventId.set(invocation.toolCallId, ev.id);
         },
         onPostToolUse: async (input, invocation) => {
+            pollSessionInfo();
             if (!PS_TOOLS.has(input.toolName)) return;
             const callEventId = invocation?.toolCallId
                 ? callIdToEventId.get(invocation.toolCallId)
@@ -216,9 +275,16 @@ const session = await joinSession({
                 output: extractResultText(input.toolResult),
             });
         },
+        // Best moment to refresh the title — Copilot often updates the session
+        // summary right after a user message arrives.
+        userPromptSubmitted: async () => { pollSessionInfo(); },
         onSessionEnd: webview.close,
     },
 });
+
+// Initial snapshot now that `session` exists, so getSessionInfo() returns
+// real data the moment the page connects (no need to wait for a tool call).
+pollSessionInfo();
 
 // Announce that the extension has finished loading. Doing this after
 // joinSession() resolves means the message fires once at extension
