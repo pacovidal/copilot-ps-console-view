@@ -74,7 +74,6 @@ footer #status {
 .entry .ts { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
 .entry .tool { color: var(--accent-tool); font-weight: 600; }
 .entry .desc { color: var(--fg-desc); font-style: italic; }
-.entry .meta { color: var(--fg-meta); font-size: 11px; }
 .entry .cmd {
   margin-top: 2px; padding: 6px 10px;
   background: var(--bg-cmd); border-left: 3px solid var(--accent-cmd);

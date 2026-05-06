@@ -52,7 +52,6 @@ Minimal example — `<extension-install-dir>/themes/midnight-purple.css`:
     --fg:               #d8d4ea;
     --fg-strong:        #ffffff;
     --fg-dim:           #6a5a8a;
-    --fg-meta:          #88c070;
     --fg-status:        #ffffff;
     --fg-cmd:           #d8d4ea;
     --fg-desc:          #b8b0d0;
@@ -106,7 +105,6 @@ Every variable below should be set by your theme.
 | `--fg`         | Default text colour, context-menu items, result body  |
 | `--fg-strong`  | Header title, button label                            |
 | `--fg-dim`     | Timestamps, chevrons, "empty" placeholder, scrollbar thumb |
-| `--fg-meta`    | Subtle "meta" line under a command (shellId, mode, …) |
 | `--fg-status`  | Footer status text, hovered context-menu text         |
 | `--fg-cmd`     | Command block text                                    |
 | `--fg-desc`    | Italic command description                            |

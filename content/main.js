@@ -145,8 +145,11 @@ function renderCall(ev) {
         headerChildren.push(el("span", { cls: "desc", text: ev.args.description }));
     }
     headerChildren.push(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
-    wrap.appendChild(makeHeader(headerChildren));
+    const header = makeHeader(headerChildren);
 
+    // Tool-call metadata (shellId, mode, detached, initial_wait, delay) is
+    // exposed as the header's tooltip rather than a dedicated visible row —
+    // it's reference info, not something the eye needs at all times.
     const a = ev.args || {};
     const meta = [];
     if (a.shellId) meta.push(`shell=${a.shellId}`);
@@ -154,7 +157,8 @@ function renderCall(ev) {
     if (a.detach) meta.push("detached");
     if (a.initial_wait != null) meta.push(`wait=${a.initial_wait}s`);
     if (a.delay != null) meta.push(`delay=${a.delay}s`);
-    if (meta.length) wrap.appendChild(el("div", { cls: "meta", text: meta.join("  ·  ") }));
+    if (meta.length) header.title = meta.join("  ·  ");
+    wrap.appendChild(header);
 
     let body = "";
     if (ev.toolName === "powershell") body = a.command ?? "";
