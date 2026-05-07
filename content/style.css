@@ -71,6 +71,10 @@ footer #status {
 }
 .entry.collapsed .chevron { transform: rotate(0deg); }
 .entry.collapsed > *:not(.header-line) { display: none; }
+/* Indent expanded body sections so their colored bars align under the
+   chevron column (just past the status circle). 16px = circle width (8px)
+   + flex gap (8px). */
+.entry > .section { margin-left: 16px; }
 .entry .ts { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
 .entry .dur {
   color: var(--fg-dim);
