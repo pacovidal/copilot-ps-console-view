@@ -71,14 +71,6 @@ footer #status {
 }
 .entry.collapsed .chevron { transform: rotate(0deg); }
 .entry.collapsed > *:not(.header-line) { display: none; }
-.entry .tool-icon {
-  color: var(--accent-tool);
-  font-weight: 600;
-  cursor: help;
-  user-select: none;
-  width: 1.1em;
-  text-align: center;
-}
 .entry .ts { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
 .entry .dur {
   color: var(--fg-dim);
@@ -174,20 +166,17 @@ footer #status {
   color: var(--accent-header);
   font-size: 11px;
 }
-.entry .interaction-marker {
-  color: var(--accent-tool);
-  font-weight: 600;
-  width: 1.1em;
-  text-align: center;
-}
 .entry .interaction-label { color: var(--fg-strong); font-weight: 600; }
 .entry .interaction-ts { color: var(--fg-dim); }
 .entry .interaction-meta { color: var(--fg-dim); margin-left: auto; }
 
 /* Per-interaction body. The colored bar + background mirror the paired
    entry's input/output sections so both rendering modes look uniform. */
+/* Per-interaction body. The colored bar + background mirror the paired
+   entry's input/output sections so both rendering modes look uniform. The
+   left margin gives a subtle visual hierarchy under the label/timestamp head. */
 .entry .interaction-body {
-  margin: 2px 0 0 1.6em;
+  margin: 2px 0 0 0.8em;
   padding: 4px 10px;
   white-space: pre;
   border-left: 3px solid var(--accent-cmd);
@@ -215,7 +204,7 @@ footer #status {
 }
 .entry .interaction.truncated {
   font-size: 10px; color: var(--fg-dim); font-style: italic;
-  padding: 2px 0 4px 1.6em;
+  padding: 2px 0 4px 0.8em;
 }
 /* `main.wrap` already wraps the entire console; honour it inside the
    transcript bodies too so long lines don't overflow. */

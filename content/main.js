@@ -122,18 +122,6 @@ function fmtDuration(ms) {
     return `${m}m ${s}s`;
 }
 
-// Per-tool icon glyph + tooltip (the original tool name). Icons are basic
-// Unicode geometric/punctuation glyphs that render reliably without depending
-// on emoji fonts. Tooltip on hover surfaces the actual tool name so the
-// mapping is discoverable.
-const TOOL_ICONS = {
-    powershell:       { icon: "▶", tip: "powershell" },
-    write_powershell: { icon: "✎", tip: "write_powershell" },
-    read_powershell:  { icon: "◉", tip: "read_powershell" },
-    stop_powershell:  { icon: "⏹", tip: "stop_powershell" },
-    list_powershell:  { icon: "☰", tip: "list_powershell" },
-};
-
 function el(tag, opts = {}) {
     const e = document.createElement(tag);
     if (opts.cls) e.className = opts.cls;
@@ -249,10 +237,8 @@ function appendInteraction(sess, kind, ev, extra = {}) {
 
     const block = el("div", { cls: `interaction interaction-${kind}` });
     const headLine = el("div", { cls: "interaction-head" });
-    const markerInfo = INTERACTION_MARKERS[kind] || { icon: "•", label: kind };
-    const marker = el("span", { cls: "interaction-marker", text: markerInfo.icon });
-    headLine.appendChild(marker);
-    headLine.appendChild(el("span", { cls: "interaction-label", text: markerInfo.label }));
+    const label = INTERACTION_LABELS[kind] || kind;
+    headLine.appendChild(el("span", { cls: "interaction-label", text: label }));
     headLine.appendChild(el("span", { cls: "interaction-ts", text: fmtTime(ev.timestamp) }));
     const meta = metaTooltipFor(ev);
     if (meta) headLine.title = meta;
@@ -319,11 +305,11 @@ function setInteractionBodyText(block, text) {
     body.appendChild(document.createTextNode(text));
 }
 
-const INTERACTION_MARKERS = {
-    start: { icon: "▶", label: "Started" },
-    write: { icon: "→", label: "Sent" },
-    read:  { icon: "◉", label: "Read" },
-    stop:  { icon: "⏹", label: "Stopped" },
+const INTERACTION_LABELS = {
+    start: "Started",
+    write: "Sent",
+    read:  "Read",
+    stop:  "Stopped",
 };
 
 // Status tags a session can take. Listed exhaustively so we can clear them
@@ -364,10 +350,6 @@ function renderSessionEntry(sess) {
 
     const header = el("div", { cls: "header-line" });
     header.appendChild(el("span", { cls: "chevron", text: "▸" }));
-    const iconInfo = TOOL_ICONS["powershell"];
-    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
-    iconEl.title = "powershell --mode=async (session)";
-    header.appendChild(iconEl);
 
     const statusTag = el("span", { cls: "status-tag", text: "pending" });
     header.appendChild(statusTag);
@@ -409,9 +391,6 @@ function renderListEntry(callEv, resultEv) {
     wrap.dataset.callId = String(callEv.id);
 
     const header = el("div", { cls: "header-line" });
-    const iconEl = el("span", { cls: "tool-icon", text: TOOL_ICONS.list_powershell.icon });
-    iconEl.title = "list_powershell";
-    header.appendChild(iconEl);
 
     // Try to extract the active session count from the result text. If we
     // don't have a result yet, leave it as a plain "Listed sessions" label.
@@ -437,10 +416,9 @@ function renderListEntry(callEv, resultEv) {
 function renderOrphanContinuation(ev) {
     const wrap = el("div", { cls: "entry orphan-continuation" });
     const header = el("div", { cls: "header-line" });
-    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
-    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
-    iconEl.title = iconInfo.tip;
-    header.appendChild(iconEl);
+    const tool = ev.toolName.replace(/_powershell$/, "");
+    const verb = tool.charAt(0).toUpperCase() + tool.slice(1);
+    header.appendChild(el("span", { cls: "desc", text: verb }));
     const shellId = ev.args?.shellId || "?";
     header.appendChild(el("span", { cls: "shell-chip missing", text: `shell=${shellId} missing` }));
     header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
@@ -493,13 +471,6 @@ function renderPair(ev) {
     const header = el("div", { cls: "header-line" });
     const chevron = el("span", { cls: "chevron", text: "▸" });
     header.appendChild(chevron);
-
-    // Tool icon (clickable target shares the chevron's role; the icon's title
-    // attribute lets users discover the underlying tool name).
-    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
-    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
-    iconEl.title = iconInfo.tip;
-    header.appendChild(iconEl);
 
     if (ev.synthetic) {
         const tag = el("span", { cls: "synthetic-tag", text: "◇" });
@@ -582,10 +553,6 @@ function upsertResult(ev) {
     const orphan = el("div", { cls: `entry pair status-${status} orphan-result` });
     const header = el("div", { cls: "header-line" });
     header.appendChild(el("span", { cls: "chevron", text: "▸" }));
-    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
-    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
-    iconEl.title = iconInfo.tip;
-    header.appendChild(iconEl);
     header.appendChild(el("span", { cls: "status-tag", text: status }));
     header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
     header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
