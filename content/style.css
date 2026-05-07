@@ -82,7 +82,21 @@ footer #status {
   min-width: 4em;
   text-align: right;
 }
-.entry .desc { color: var(--fg-desc); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.entry .desc {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 600;
+  color: var(--fg-strong);
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+/* Subtle title-bar background on every entry header so it visually
+   separates from the body sections (when expanded) and reads as a
+   distinct row (when collapsed). */
+.entry > .header-line {
+  background: var(--bg-header);
+  padding: 2px 8px;
+  border-radius: 2px;
+  margin: 0 -2px;
+}
 .entry .synthetic-tag {
   color: var(--fg-dim);
   font-size: 11px;
