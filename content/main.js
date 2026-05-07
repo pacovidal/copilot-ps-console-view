@@ -5,6 +5,7 @@ const consoleEl = document.getElementById("console");
 const clearBtn = document.getElementById("clear");
 const activeStyleEl = document.getElementById("active-theme");
 const sessionInfoEl = document.getElementById("session-info");
+const cwdInfoEl = document.getElementById("cwd-info");
 
 const seenIds = new Set();
 let lastSeenId = 0;
@@ -945,13 +946,17 @@ window.psConsole = { append, setSessionInfo };
 
 // --- Session info ----------------------------------------------------------
 // Footer left side: "Session: 'Get Latest Versions'" (full GUID on hover).
+// Footer right side: "<cwd> · <branch>" so it's clear which workspace you're
+// looking at without having to glance at another window.
 // Window title:     "Get Latest Versions — Copilot PowerShell Console".
-// Both updated whenever the extension polls and detects a summary change.
+// All updated whenever the extension polls and detects a change.
 function setSessionInfo(info) {
     const summary = (info && typeof info.summary === "string" && info.summary) || null;
     const sessionId = (info && typeof info.sessionId === "string" && info.sessionId) || null;
+    const cwd = (info && typeof info.cwd === "string" && info.cwd) || null;
+    const branch = (info && typeof info.branch === "string" && info.branch) || null;
 
-    // Footer text — show the summary in quotes when present; otherwise show
+    // Footer left — show the summary in quotes when present; otherwise show
     // the GUID itself so the session is still identifiable. Tooltip always
     // exposes the full GUID for unambiguous reference.
     let footerText;
@@ -968,6 +973,13 @@ function setSessionInfo(info) {
     } else {
         sessionInfoEl.removeAttribute("title");
     }
+
+    // Footer right — cwd plus branch (when present). The branch is wrapped
+    // in `[⎇ name]` so it visually groups even without an explicit separator.
+    // Empty when neither is known; the CSS hides empty spans so the footer
+    // collapses cleanly.
+    const branchPart = branch ? `[⎇ ${branch}]` : "";
+    cwdInfoEl.textContent = [cwd, branchPart].filter(Boolean).join(" ");
 
     // Window title — WebView2/wry doesn't reflect document.title to the native
     // OS title bar automatically, so we also set it (best-effort, ignored if

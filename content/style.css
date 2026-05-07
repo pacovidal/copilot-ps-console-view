@@ -51,6 +51,15 @@ footer .session-info {
   cursor: default;
 }
 footer .session-info:empty { display: none; }
+footer .cwd-info {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+footer .cwd-info:empty { display: none; }
 .entry { margin-bottom: 6px; }
 .entry .header-line {
   display: flex; gap: 8px; align-items: baseline;

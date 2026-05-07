@@ -201,38 +201,38 @@ function prunePendingCalls() {
 let sessionRef = null;
 let lastSessionInfo = null;
 
-function readWorkspaceSummary(workspacePath) {
-    if (!workspacePath || typeof workspacePath !== "string") return null;
+function readWorkspaceMeta(workspacePath) {
+    if (!workspacePath || typeof workspacePath !== "string") return {};
     try {
         const yaml = readFileSync(join(workspacePath, "workspace.yaml"), "utf8");
-        // Tiny inline parse — we only need the top-level `summary:` line. Avoid
-        // pulling in a YAML dependency for one field. Matches: `summary: <text>`
-        // (unquoted scalar) since that's what the host writes.
-        const m = yaml.match(/^summary:\s*(.*)$/m);
-        if (!m) return null;
-        let val = m[1].trim();
-        // YAML block scalar indicators (`|`, `>`, optionally with chomping
-        // `-`/`+` or an explicit indentation digit) put the actual value on
-        // subsequent indented lines. A real YAML parse would follow the
-        // continuation; for our needs, treating those as "no usable summary"
-        // and falling back to the GUID is good enough — the host writes plain
-        // scalars in practice and this just guards against a future change.
-        if (/^[|>][-+]?\d*$/.test(val)) return null;
-        // Strip surrounding quotes if the host happened to quote it.
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
+        // Tiny inline parse — we only need a few top-level scalar keys. Avoid
+        // pulling in a YAML dependency. The host writes plain (sometimes
+        // quoted) scalars in practice; block scalars are treated as absent.
+        const out = {};
+        for (const key of ["summary", "cwd", "branch"]) {
+            const m = yaml.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
+            if (!m) continue;
+            let val = m[1].trim();
+            if (/^[|>][-+]?\d*$/.test(val)) continue;
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.slice(1, -1);
+            }
+            if (val) out[key] = val;
         }
-        return val || null;
+        return out;
     } catch {
-        return null;
+        return {};
     }
 }
 
 function snapshotSessionInfo() {
     if (!sessionRef) return null;
+    const meta = readWorkspaceMeta(sessionRef._workspacePath);
     return {
         sessionId: sessionRef.sessionId,
-        summary: readWorkspaceSummary(sessionRef._workspacePath),
+        summary: meta.summary || null,
+        cwd: meta.cwd || null,
+        branch: meta.branch || null,
     };
 }
 
@@ -241,7 +241,9 @@ function pollSessionInfo() {
     if (!info) return;
     if (lastSessionInfo
         && lastSessionInfo.sessionId === info.sessionId
-        && lastSessionInfo.summary === info.summary) {
+        && lastSessionInfo.summary === info.summary
+        && lastSessionInfo.cwd === info.cwd
+        && lastSessionInfo.branch === info.branch) {
         return;
     }
     lastSessionInfo = info;
