@@ -169,11 +169,10 @@ const MAX_SESSIONS = 50;
 // exceed MAX_SESSIONS. Active and pending sessions are never evicted.
 function evictOldSessions() {
     if (sessions.size <= MAX_SESSIONS) return;
-    const TERMINAL = new Set(["stopped", "failure", "denied", "rejected", "unknown"]);
     // Map iteration order is insertion order, so the oldest entries come first.
     for (const [shellId, sess] of sessions) {
         if (sessions.size <= MAX_SESSIONS) break;
-        if (!TERMINAL.has(sess.status)) continue;
+        if (!TERMINAL_STATUSES.has(sess.status)) continue;
         if (sess.entryDOM && sess.entryDOM.parentNode) {
             sess.entryDOM.parentNode.removeChild(sess.entryDOM);
         }
@@ -220,6 +219,13 @@ function statusFromResult(ev) {
     return ev?.status || "success";
 }
 
+const INTERACTION_LABELS = {
+    start: "Started",
+    write: "Sent",
+    read:  "Read",
+    stop:  "Stopped",
+};
+
 // Append one interaction sub-block to a session's transcript. Returns the
 // DOM node so the caller can update it later (e.g. fill in a read's output
 // when the result arrives, or set status on stop completion).
@@ -262,7 +268,6 @@ function appendInteraction(sess, kind, ev, extra = {}) {
         }
         block.appendChild(body);
         block._bodyEl = body;
-        block._bodyFlavour = flavour;
     }
 
     sess.transcriptEl.appendChild(block);
@@ -293,12 +298,12 @@ function appendInteraction(sess, kind, ev, extra = {}) {
     return block;
 }
 
-// Replace just the text content of an interaction body without disturbing
-// the leading "PS> " prompt (if any) or its colored-bar styling.
+// Replace the text content of an interaction body, preserving any leading
+// "PS> " prompt span. Class assignments (interaction-pending, status, etc.)
+// are the caller's responsibility.
 function setInteractionBodyText(block, text) {
     if (!block || !block._bodyEl) return;
     const body = block._bodyEl;
-    body.classList.remove("interaction-pending");
     const prompt = body.querySelector(".prompt");
     body.textContent = "";
     if (prompt) body.appendChild(prompt);
@@ -331,13 +336,6 @@ function applyOutputToBody(bodyEl, rawText) {
     if (tooltip) bodyEl.title = tooltip;
     else bodyEl.removeAttribute("title");
 }
-
-const INTERACTION_LABELS = {
-    start: "Started",
-    write: "Sent",
-    read:  "Read",
-    stop:  "Stopped",
-};
 
 // Status tags a session can take. Listed exhaustively so we can clear them
 // all when transitioning between any two — failure-then-stop, etc.
@@ -470,13 +468,10 @@ function renderOrphanContinuation(ev) {
 const entryByCallId = new Map();
 
 function inputBodyFor(ev) {
-    const a = ev.args || {};
-    if (ev.toolName === "powershell") return a.command ?? "";
-    if (ev.toolName === "write_powershell") return a.input ?? "";
-    if (ev.toolName === "read_powershell") return "(read buffered output)";
-    if (ev.toolName === "stop_powershell") return "(stop session)";
-    if (ev.toolName === "list_powershell") return "(list sessions)";
-    return JSON.stringify(a, null, 2);
+    // Only the sync `powershell` tool reaches renderPair; every other PS tool
+    // is intercepted by handleCall and routed to a session/list/orphan path.
+    if (ev.toolName === "powershell") return ev.args?.command ?? "";
+    return JSON.stringify(ev.args || {}, null, 2);
 }
 
 function metaTooltipFor(ev) {
@@ -780,8 +775,9 @@ function completeSessionStart(sess, startBlock, resultEv) {
 
 // Append an output sub-body to an interaction block and stamp it with the
 // result's status so the colored bar mirrors the paired-entry output style.
-// CLI trailer is stripped for display and exposed as a tooltip. Returns
-// null when the cleaned output is empty (so callers can skip rendering).
+// CLI trailer is stripped for display and exposed as a tooltip. When the
+// cleaned output is empty, renders a dim "(no output)" placeholder so the
+// lifecycle tooltip still has somewhere to live.
 function appendOutputSubBody(block, text, status) {
     const { body: cleaned, tooltip } = splitCliTrailer(text || "");
     if (!cleaned && !tooltip) return null;
@@ -791,7 +787,6 @@ function appendOutputSubBody(block, text, status) {
     if (!cleaned) body.classList.add("interaction-pending");
     if (tooltip) body.title = tooltip;
     block.appendChild(body);
-    block._outputEl = body;
     return body;
 }
 
@@ -863,7 +858,6 @@ function completeContinuation(sess, kind, block, resultEv) {
             body.textContent = displayText;
             if (tooltip) body.title = tooltip;
             block.appendChild(body);
-            block._outputEl = body;
         }
         return;
     }
@@ -872,12 +866,8 @@ function completeContinuation(sess, kind, block, resultEv) {
             const { displayText, tooltip, isPlaceholder } = deltaAgainstSession(sess, resultEv?.output || "");
             block._bodyEl.classList.remove("interaction-pending");
             block._bodyEl.classList.add(`interaction-status-${status}`);
-            setInteractionBodyText(block, displayText);
-            // setInteractionBodyText strips `interaction-pending` as a side
-            // effect (its original purpose was promoting "(reading…)" to real
-            // output). Re-add it AFTER so the dim/italic placeholder style
-            // matches Started's empty-body rendering.
             if (isPlaceholder) block._bodyEl.classList.add("interaction-pending");
+            setInteractionBodyText(block, displayText);
             if (tooltip) block._bodyEl.title = tooltip;
             else block._bodyEl.removeAttribute("title");
         }
@@ -885,13 +875,13 @@ function completeContinuation(sess, kind, block, resultEv) {
     }
     if (kind === "stop") {
         if (block._bodyEl) {
-            block._bodyEl.classList.remove("interaction-pending");
-            block._bodyEl.classList.add(`interaction-status-${status}`);
             const { body: cleaned, tooltip } = splitCliTrailer(resultEv?.output || "");
             // Stop usually just yields a confirmation that becomes the
             // tooltip; with no body content left there's nothing useful to
             // show, so drop the placeholder body entirely.
             if (cleaned) {
+                block._bodyEl.classList.remove("interaction-pending");
+                block._bodyEl.classList.add(`interaction-status-${status}`);
                 setInteractionBodyText(block, cleaned);
                 if (tooltip) block._bodyEl.title = tooltip;
             } else {

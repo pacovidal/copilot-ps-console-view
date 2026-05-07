@@ -19,10 +19,11 @@ every call to:
 - `stop_powershell`
 - `list_powershell`
 
-Each command is shown with a colour-coded status tag (`success`, `failure`,
-`rejected`, `denied`, plus a pulsing grey `pending` while the result is in
-flight). Calls and results are paired into a single collapsible entry,
-with the input text under "Input" and the captured output under "Output".
+Each command renders as a collapsible entry tagged with a small status
+circle (green = success/active/stopped, pulsing green = pending, red =
+failure/rejected/denied/unknown). Hover the circle to see the exact status.
+Calls and results are paired into a single entry, with the input text
+(prefixed with `PS>`) and the captured output stacked underneath.
 
 Async sessions get special treatment: see [Sessions](#sessions) below.
 
@@ -139,18 +140,19 @@ Subsequent `write_powershell`, `read_powershell`, and `stop_powershell` calls
 that target the same `shellId` are folded into the session's body as a
 **transcript** — one labelled line per interaction:
 
-- `▶ Started` — the initial command and its captured startup output
-- `→ Sent` — input written into the session
-- `◉ Read` — output read back from the session
-- `⏹ Stopped` — when the session is explicitly stopped
+- **Started** — the initial command and its captured startup output
+- **Sent** — input written into the session
+- **Read** — output read back from the session (deduped: only new content
+  since the previous read/write is shown)
+- **Stopped** — when the session is explicitly stopped
 
-The header shows a status tag (`pending` → `active` → `stopped`), the
+The header shows the status circle (`pending` → `active` → `stopped`), the
 `shell=<id>` chip, the start time, and a live duration that ticks while
 the session is `active` and freezes once it stops.
 
-`list_powershell` calls render as a single-line entry (`☰ Listed N active
-session(s)`). To declutter, right-click → **✓ Show list_powershell entries**
-toggles them off for the current session.
+`list_powershell` calls are noisy, so they're **hidden by default** and
+render as a single-line entry (`Listed N active session(s)`) when shown.
+Right-click → **Show list_powershell entries** to toggle them on.
 
 If a `write_powershell`/`read_powershell`/`stop_powershell` call references
 a `shellId` whose start was never observed (extension reloaded mid-session,

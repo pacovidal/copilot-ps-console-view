@@ -114,12 +114,11 @@ Every variable below should be set by your theme.
 | Variable           | Used for                                                  |
 | ------------------ | --------------------------------------------------------- |
 | `--accent-status`  | Live "dot" in the header (and its glow)                   |
-| `--accent-tool`    | Tool name in entry headers                                |
 | `--accent-header`  | Entry header line text                                    |
 | `--accent-cmd`     | Command block left border + `PS>` prompt                  |
-| `--accent-success` | Result block (success) left border + status-tag background |
-| `--accent-failure` | Result block (failure) border, body text, status-tag background |
-| `--accent-warn`    | Result block (rejected/denied) border, body text, status-tag background |
+| `--accent-success` | Status circle (success/active/stopped/pending) + healthy result/output bar |
+| `--accent-failure` | Status circle (failure/rejected/denied/unknown) + non-success result/output bar |
+| `--accent-warn`    | Missing-shell chip on orphan continuation entries         |
 
 ### Borders & effects
 

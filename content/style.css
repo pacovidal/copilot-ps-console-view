@@ -118,15 +118,8 @@ footer #status {
 }
 
 /* Body sections (Input + Output). The left-border colour follows the entry
-   status so the visual link to the status tag is preserved. */
+   status so the visual link to the status circle is preserved. */
 .entry .section { margin-top: 2px; }
-.entry .section-label {
-  color: var(--fg-dim);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px 10px 0;
-}
 .entry .section-body {
   padding: 6px 10px;
   background: var(--bg-result);
@@ -140,13 +133,14 @@ footer #status {
 }
 .entry .input-section .prompt { color: var(--accent-cmd); user-select: none; }
 
-/* Output left-border colour mirrors the status tag, like the old per-result
-   colouring. */
+/* Output left-border colour reflects the result status. Failure / rejected /
+   denied / unknown all share the same red so the bar matches the red status
+   circle for those statuses. */
 .entry .output-section .section-body { border-left-color: var(--accent-success); color: var(--fg); }
-.entry.status-failure  .output-section .section-body { border-left-color: var(--accent-failure); color: var(--accent-failure); }
+.entry.status-failure  .output-section .section-body,
 .entry.status-rejected .output-section .section-body,
-.entry.status-denied   .output-section .section-body { border-left-color: var(--accent-warn);    color: var(--accent-warn); }
-.entry.status-unknown  .output-section .section-body { border-left-color: var(--fg-dim);         color: var(--fg-dim); }
+.entry.status-denied   .output-section .section-body,
+.entry.status-unknown  .output-section .section-body { border-left-color: var(--accent-failure); color: var(--accent-failure); }
 .entry.pending         .output-section .section-body { border-left-color: var(--fg-dim); }
 .entry .output-pending { color: var(--fg-dim); font-style: italic; }
 
@@ -181,8 +175,6 @@ footer #status {
 .entry .interaction-meta { color: var(--fg-dim); margin-left: auto; }
 
 /* Per-interaction body. The colored bar + background mirror the paired
-   entry's input/output sections so both rendering modes look uniform. */
-/* Per-interaction body. The colored bar + background mirror the paired
    entry's input/output sections so both rendering modes look uniform. The
    left margin gives a subtle visual hierarchy under the label/timestamp head. */
 .entry .interaction-body {
@@ -202,10 +194,12 @@ footer #status {
   border-left-color: var(--accent-success);
   color: var(--fg);
 }
-.entry .interaction-body.interaction-status-failure  { border-left-color: var(--accent-failure); color: var(--accent-failure); }
+/* Per-interaction status colouring. Same red for every problem status so the
+   bar matches the red status circle on the entry header. */
+.entry .interaction-body.interaction-status-failure,
 .entry .interaction-body.interaction-status-rejected,
-.entry .interaction-body.interaction-status-denied   { border-left-color: var(--accent-warn);    color: var(--accent-warn); }
-.entry .interaction-body.interaction-status-unknown  { border-left-color: var(--fg-dim);         color: var(--fg-dim); }
+.entry .interaction-body.interaction-status-denied,
+.entry .interaction-body.interaction-status-unknown { border-left-color: var(--accent-failure); color: var(--accent-failure); }
 .entry .interaction-body.interaction-pending {
   color: var(--fg-dim);
   font-style: italic;
