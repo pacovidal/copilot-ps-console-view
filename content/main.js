@@ -315,9 +315,14 @@ function setInteractionBodyText(block, text) {
 // running after Ns. ...>`, `<command with id: foo stopped>`, etc. — are
 // noise inside the displayed output. Strip them and surface the trailer as
 // a tooltip on the body so the lifecycle info is still discoverable.
+//
+// The trailer vocabulary is small and distinctive; we whitelist the known
+// prefixes so we don't accidentally strip legitimate command output ending
+// in angle-bracketed content (HTML/XML, generic types, email addresses, etc.).
+const CLI_TRAILER_RE = /\s*<(?:exited\s|command\s(?:with|started)\s|no\s+active\s|unable\s+to\s)[^>]*>\s*$/i;
 function splitCliTrailer(text) {
     if (typeof text !== "string" || !text) return { body: text || "", tooltip: null };
-    const m = text.match(/\s*<[^>]+>\s*$/);
+    const m = text.match(CLI_TRAILER_RE);
     if (!m) return { body: text, tooltip: null };
     return { body: text.slice(0, m.index), tooltip: m[0].trim() };
 }
@@ -554,27 +559,11 @@ function renderPair(ev) {
 // `forCallId`). If the matching entry isn't found (e.g. Clear was clicked
 // between the call and the result, or this page is replaying history that
 // was partially evicted), we render the result as its own minimal entry.
-function upsertResult(ev) {
-    const callId = ev.forCallId;
-    const wrap = callId != null ? entryByCallId.get(callId) : null;
-
-    if (wrap) {
-        const status = ev.status || "success";
-        wrap.classList.remove("pending");
-        wrap.classList.add(`status-${status}`);
-        wrap._statusTag.title = status;
-        wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
-        const outputBody = wrap._outputBody;
-        outputBody.classList.remove("output-pending");
-        applyOutputToBody(outputBody, ev.output);
-        if (callId != null) entryByCallId.delete(callId);
-        return wrap;
-    }
-
-    // Standalone result with no matching call — should be rare given the
-    // synthesis-on-orphan path in main.mjs always creates a call first, but
-    // defensively render a minimal single-section entry so nothing goes
-    // missing.
+// Build a fallback orphan-result entry for a result event with no matching
+// call (e.g. Clear was clicked between call and result, or this page is
+// replaying history that was partially evicted). Should be rare given the
+// synthesis-on-orphan path in main.mjs always creates a call first.
+function renderOrphanResult(ev) {
     const status = ev.status || "success";
     const orphan = el("div", { cls: `entry pair status-${status} orphan-result` });
     const header = el("div", { cls: "header-line" });
@@ -586,7 +575,9 @@ function upsertResult(ev) {
     header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
     orphan.appendChild(header);
     const outputSec = el("div", { cls: "section output-section" });
-    outputSec.appendChild(el("div", { cls: "section-body output-body", text: ev.output || "(no output)" }));
+    const outputBody = el("div", { cls: "section-body output-body" });
+    applyOutputToBody(outputBody, ev.output);
+    outputSec.appendChild(outputBody);
     orphan.appendChild(outputSec);
     return orphan;
 }
@@ -707,7 +698,7 @@ function handleResult(ev) {
     // No matching call — fall back to a minimal orphan-result entry so the
     // result doesn't disappear silently.
     clearEmpty();
-    const node = upsertResult(ev);
+    const node = renderOrphanResult(ev);
     if (!opts.expandNew) node.classList.add("collapsed");
     consoleEl.appendChild(node);
     if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
@@ -817,10 +808,14 @@ function handleSessionContinuationCall(sess, kind, ev) {
 
 // Compute what to display for a tool result whose output is a full session
 // buffer snapshot. Returns the text to render (trimmed of any prefix we've
+// Compute what to display for a tool result whose output is a full session
+// buffer snapshot. Returns the text to render (trimmed of any prefix we've
 // already shown), the lifecycle tooltip extracted from the CLI trailer, and
-// a flag indicating the result is "no new content". Always advances
-// `sess.lastSeenBuffer` to the new full buffer so subsequent calls slice
-// against the latest state.
+// a flag indicating the result is "no new content". Advances
+// `sess.lastSeenBuffer` to the new full buffer ONLY when it carries content
+// — a transient empty read (timing race, server tick) must not clobber the
+// dedup baseline, otherwise re-showing the same buffer afterwards would be
+// rendered as new content.
 function deltaAgainstSession(sess, raw) {
     const { body: cleanCurr, tooltip } = splitCliTrailer(raw || "");
     const prev = sess.lastSeenBuffer || "";
@@ -840,7 +835,7 @@ function deltaAgainstSession(sess, raw) {
         displayText = "(no output)";
         isPlaceholder = true;
     }
-    sess.lastSeenBuffer = cleanCurr;
+    if (cleanCurr) sess.lastSeenBuffer = cleanCurr;
     return { displayText, tooltip, isPlaceholder };
 }
 
