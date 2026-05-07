@@ -51,9 +51,6 @@ footer .session-info {
   cursor: default;
 }
 footer .session-info:empty { display: none; }
-footer #status {
-  flex: 0 0 auto;
-}
 .entry { margin-bottom: 6px; }
 .entry .header-line {
   display: flex; gap: 8px; align-items: baseline;

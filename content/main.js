@@ -2,7 +2,6 @@
 // `window.copilot` is provided by /__bridge.js.
 
 const consoleEl = document.getElementById("console");
-const statusEl = document.getElementById("status");
 const clearBtn = document.getElementById("clear");
 const activeStyleEl = document.getElementById("active-theme");
 const sessionInfoEl = document.getElementById("session-info");
@@ -1176,13 +1175,10 @@ async function loadHistory() {
         const hist = await copilot.getHistory();
         if (Array.isArray(hist) && hist.length) {
             for (const ev of hist) appendOne(ev);
-            statusEl.textContent = `connected · ${hist.length} event(s) replayed`;
         } else {
             showEmpty();
-            statusEl.textContent = "connected · idle";
         }
-    } catch (e) {
-        statusEl.textContent = `connection error: ${e?.message ?? e}`;
+    } catch {
         showEmpty();
     }
 }
