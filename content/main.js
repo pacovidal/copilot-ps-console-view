@@ -139,10 +139,20 @@ function makeHeader(initialChildren = []) {
 }
 
 function renderCall(ev) {
-    const wrap = el("div", { cls: "entry call" });
+    const wrap = el("div", { cls: ev.synthetic ? "entry call synthetic" : "entry call" });
     const headerChildren = [el("span", { cls: "tool", text: ev.toolName })];
     if (ev.args?.description) {
         headerChildren.push(el("span", { cls: "desc", text: ev.args.description }));
+    }
+    if (ev.synthetic) {
+        // Subtle marker so the user knows this entry is reconstructed from the
+        // post hook (the live "running" state was missed — usually because the
+        // CLI host's hooks snapshot didn't refresh after an extensions_reload
+        // mid-loop). We render it as a small diamond rather than a tag to
+        // avoid drawing too much attention.
+        const tag = el("span", { cls: "synthetic-tag", text: "◇" });
+        tag.title = "Reconstructed: pre-hook was lost (likely an extension reload during the agent's tool-execution loop). The command did run; only the live 'running' state was missed.";
+        headerChildren.push(tag);
     }
     headerChildren.push(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
     const header = makeHeader(headerChildren);

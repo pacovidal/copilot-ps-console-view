@@ -146,6 +146,38 @@ Reopening the Theme submenu picks up new files automatically. See
 [`content/themes/README.md`](content/themes/README.md) for the variable
 reference and a copy-pastable starter template.
 
+## Known limitations
+
+### Reconstructed call entries (the `◇` marker)
+
+A small dim diamond next to a tool name means the call entry was
+reconstructed from the result, because the live "tool starting" hook never
+reached this extension. This is caused by an upstream Copilot CLI bug:
+`runAgenticLoop` snapshots its hooks once at loop start, and after an
+`extensions_reload` mid-loop the snapshot still references the dead old
+extension's IPC connection. Subsequent `preToolUse` invocations silently
+fail. The result still arrives via the live `postToolUse` path, so the
+extension synthesizes a placeholder call event from the post hook's
+arguments and pairs it. The command + output are accurate; only the live
+"running" view was missed. Fixed automatically on the next user prompt
+(which restarts `runAgenticLoop` and refreshes the snapshot).
+
+### Same-args parallel mispairing (rare)
+
+When two PS calls have byte-identical summarized arguments AND their
+results arrive out of pre-hook order (one fails so its post never fires,
+or two parallel `read_powershell` calls with the same `shellId` + `delay`
+complete out of order), the pair-matching can swap their entries — call A
+will display result B and vice versa. Single isolated mispair, no broader
+poisoning.
+
+### Diagnostic log
+
+Set `COPILOT_PS_CONSOLE_DEBUG=1` in your shell environment before
+launching Copilot CLI to enable a JSONL diagnostic log at
+`<extension-install-dir>\_debug.log`. Useful for filing issues if you
+see unexpected behavior.
+
 ## Uninstall
 
 ```powershell
