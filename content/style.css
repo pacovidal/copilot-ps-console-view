@@ -145,6 +145,77 @@ footer #status {
 .entry.status-unknown  .output-section .section-body { border-left-color: var(--fg-dim);         color: var(--fg-dim); }
 .entry.pending         .output-section .section-body { border-left-color: var(--fg-dim); }
 .entry .output-pending { color: var(--fg-dim); font-style: italic; }
+
+/* --- Sessions (Tier 3): persistent entries with a transcript ------------ */
+.entry.session.status-active .status-tag { background: var(--accent-success); }
+.entry.session.status-stopped .status-tag { background: var(--fg-dim); }
+.entry .shell-chip {
+  font-size: 10px;
+  color: var(--fg-dim);
+  background: var(--bg-cmd);
+  border: 1px solid var(--border-button);
+  border-radius: 3px;
+  padding: 0 6px;
+  font-family: inherit;
+}
+.entry .shell-chip.missing { font-style: italic; color: var(--accent-warn); border-color: var(--accent-warn); }
+
+.entry .transcript-section .transcript {
+  padding: 4px 10px 6px;
+  background: var(--bg-result);
+  border-left: 3px solid var(--accent-cmd);
+  color: var(--fg);
+}
+.entry.session.status-active  .transcript-section .transcript { border-left-color: var(--accent-success); }
+.entry.session.status-stopped .transcript-section .transcript { border-left-color: var(--fg-dim); }
+.entry.session.status-failure .transcript-section .transcript { border-left-color: var(--accent-failure); color: var(--accent-failure); }
+
+.entry .interaction { margin: 4px 0; }
+.entry .interaction:first-child { margin-top: 0; }
+.entry .interaction-head {
+  display: flex; gap: 8px; align-items: baseline;
+  color: var(--accent-header);
+  font-size: 11px;
+}
+.entry .interaction-marker {
+  color: var(--accent-tool);
+  font-weight: 600;
+  width: 1.1em;
+  text-align: center;
+}
+.entry .interaction-label { color: var(--fg-strong); font-weight: 600; }
+.entry .interaction-ts { color: var(--fg-dim); }
+.entry .interaction-meta { color: var(--fg-dim); margin-left: auto; }
+.entry .interaction-body {
+  margin-top: 2px;
+  padding: 2px 0 2px 1.6em;
+  color: var(--fg-cmd);
+  white-space: pre;
+}
+.entry .interaction-body.interaction-pending { color: var(--fg-dim); font-style: italic; }
+.entry .interaction-body.interaction-output { color: var(--fg); }
+.entry .interaction.truncated {
+  font-size: 10px; color: var(--fg-dim); font-style: italic;
+  padding: 2px 0 4px 1.6em;
+}
+/* `main.wrap` already wraps the entire console; honour it inside the
+   transcript bodies too so long lines don't overflow. */
+main.wrap .entry .interaction-body { white-space: pre-wrap; word-break: break-word; }
+
+/* --- list_powershell compact one-liner --------------------------------- */
+.entry.list-powershell { margin-bottom: 2px; }
+.entry.list-powershell .header-line { color: var(--fg-dim); }
+.entry.list-powershell .desc { font-style: normal; color: var(--fg-dim); }
+.entry.list-powershell .ts { color: var(--fg-dim); }
+.entry.list-powershell .chevron { display: none; }
+/* Toggle in right-click menu hides them via this body class. */
+main.hide-list .entry.list-powershell { display: none; }
+
+/* --- orphan continuation one-liner ------------------------------------- */
+.entry.orphan-continuation { margin-bottom: 2px; }
+.entry.orphan-continuation .header-line { color: var(--fg-dim); }
+.entry.orphan-continuation .chevron { display: none; }
+
 .empty { color: var(--fg-dim); font-style: italic; padding: 20px; text-align: center; }
 
 #context-menu,

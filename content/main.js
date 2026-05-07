@@ -21,6 +21,7 @@ const opts = {
     autoscroll: true,
     wrap: false,
     expandNew: false,
+    showListPowershell: true,
 };
 // Apply non-default initial state to the DOM on load.
 consoleEl.classList.toggle("wrap", opts.wrap);
@@ -146,6 +147,8 @@ function showEmpty() {
     empty = true;
     // Forget any in-progress upserts since the DOM was wiped.
     entryByCallId.clear();
+    sessions.clear();
+    stopDurationTicker();
 }
 
 function clearEmpty() {
@@ -153,6 +156,265 @@ function clearEmpty() {
         consoleEl.innerHTML = "";
         empty = false;
     }
+}
+
+// --- Sessions (Tier 3) -----------------------------------------------------
+//
+// An async powershell session (`powershell` call with `mode === "async"`)
+// becomes a persistent entry whose Output area is a running TRANSCRIPT of
+// every related interaction (initial start, write, read, stop). The
+// originating `powershell --mode=async` call seeds a session keyed by
+// `shellId`. Subsequent `write_powershell` / `read_powershell` /
+// `stop_powershell` events with the same shellId update that session
+// instead of producing top-level entries.
+//
+// Sync `powershell` calls are unchanged (paired entry).
+// `list_powershell` renders as a small one-liner (toggleable).
+// Continuations whose shellId we never observed render as compact orphan
+// continuation entries.
+const sessions = new Map(); // shellId -> sessionState
+const MAX_TRANSCRIPT_LINES = 200;
+const MAX_SESSIONS = 50;
+
+// Drop the oldest stopped/terminal sessions and detach their DOM when we
+// exceed MAX_SESSIONS. Active and pending sessions are never evicted.
+function evictOldSessions() {
+    if (sessions.size <= MAX_SESSIONS) return;
+    const TERMINAL = new Set(["stopped", "failure", "denied", "rejected", "unknown"]);
+    // Map iteration order is insertion order, so the oldest entries come first.
+    for (const [shellId, sess] of sessions) {
+        if (sessions.size <= MAX_SESSIONS) break;
+        if (!TERMINAL.has(sess.status)) continue;
+        if (sess.entryDOM && sess.entryDOM.parentNode) {
+            sess.entryDOM.parentNode.removeChild(sess.entryDOM);
+        }
+        sessions.delete(shellId);
+    }
+}
+
+let durationTicker = null;
+function ensureDurationTicker() {
+    if (durationTicker) return;
+    durationTicker = setInterval(() => {
+        let anyActive = false;
+        for (const sess of sessions.values()) {
+            if (sess.status !== "active") continue;
+            anyActive = true;
+            if (sess.durEl) sess.durEl.textContent = fmtDuration(Date.now() - sess.startTime);
+        }
+        if (!anyActive) {
+            clearInterval(durationTicker);
+            durationTicker = null;
+        }
+    }, 1000);
+}
+function stopDurationTicker() {
+    if (durationTicker) { clearInterval(durationTicker); durationTicker = null; }
+}
+
+// Best-effort: extract shellId from a powershell --mode=async result's output
+// when the agent didn't pass one explicitly. The CLI's output for an async
+// start typically includes "shellId: <id>" on its own line.
+function parseShellIdFromOutput(output) {
+    if (typeof output !== "string") return null;
+    const m = output.match(/shell\s*[Ii]d:?\s*([\w.-]+)/);
+    return m ? m[1] : null;
+}
+
+function isAsyncStart(ev) {
+    return ev && ev.kind === "call"
+        && ev.toolName === "powershell"
+        && (ev.args?.mode === "async" || ev.args?.detach === true);
+}
+
+function statusFromResult(ev) {
+    return ev?.status || "success";
+}
+
+// Append one interaction sub-block to a session's transcript. Returns the
+// DOM node so the caller can update it later (e.g. fill in a read's output
+// when the result arrives, or set status on stop completion).
+function appendInteraction(sess, kind, ev, extra = {}) {
+    if (!sess.transcriptEl) return null;
+
+    const block = el("div", { cls: `interaction interaction-${kind}` });
+    const headLine = el("div", { cls: "interaction-head" });
+    const markerInfo = INTERACTION_MARKERS[kind] || { icon: "•", label: kind };
+    const marker = el("span", { cls: "interaction-marker", text: markerInfo.icon });
+    headLine.appendChild(marker);
+    headLine.appendChild(el("span", { cls: "interaction-label", text: markerInfo.label }));
+    headLine.appendChild(el("span", { cls: "interaction-ts", text: fmtTime(ev.timestamp) }));
+    const meta = metaTooltipFor(ev);
+    if (meta) headLine.title = meta;
+    if (extra.metaText) headLine.appendChild(el("span", { cls: "interaction-meta", text: extra.metaText }));
+    block.appendChild(headLine);
+
+    // Body (optional). Caller can pass `bodyText` for the initial display
+    // and later mutate `block._bodyEl.textContent`.
+    if (extra.bodyText != null || extra.placeholder) {
+        const body = el("div", { cls: "interaction-body" });
+        if (extra.bodyText != null) body.textContent = extra.bodyText;
+        else { body.classList.add("interaction-pending"); body.textContent = extra.placeholder; }
+        block.appendChild(body);
+        block._bodyEl = body;
+    }
+
+    sess.transcriptEl.appendChild(block);
+    sess.transcriptCount++;
+    if (kind === "start" && !sess.startBlock) sess.startBlock = block;
+
+    // Trim old interactions if we've exceeded the cap. Pin the truncation
+    // marker AND the start block at the top so the user always sees how the
+    // session began.
+    if (sess.transcriptCount > MAX_TRANSCRIPT_LINES) {
+        if (!sess.truncationMarker) {
+            sess.truncationMarker = el("div", { cls: "interaction truncated", text: "… earlier interactions truncated …" });
+            // Insert the marker AFTER the start block so the layout reads:
+            // [Started …] / [… truncated …] / [oldest surviving interaction] …
+            const after = sess.startBlock ? sess.startBlock.nextSibling : sess.transcriptEl.firstChild;
+            sess.transcriptEl.insertBefore(sess.truncationMarker, after);
+        }
+        const kids = sess.transcriptEl.children;
+        for (let i = 0; i < kids.length; i++) {
+            const child = kids[i];
+            if (child === sess.truncationMarker) continue;
+            if (child === sess.startBlock) continue;
+            sess.transcriptEl.removeChild(child);
+            sess.transcriptCount--;
+            break;
+        }
+    }
+    return block;
+}
+
+const INTERACTION_MARKERS = {
+    start: { icon: "▶", label: "Started" },
+    write: { icon: "→", label: "Sent" },
+    read:  { icon: "◉", label: "Read" },
+    stop:  { icon: "⏹", label: "Stopped" },
+};
+
+// Status tags a session can take. Listed exhaustively so we can clear them
+// all when transitioning between any two — failure-then-stop, etc.
+const SESSION_STATUSES = [
+    "pending", "active", "stopped",
+    "failure", "denied", "rejected", "unknown",
+];
+// Statuses that end a session's lifetime — duration is frozen on entry.
+const TERMINAL_STATUSES = new Set([
+    "stopped", "failure", "denied", "rejected", "unknown",
+]);
+
+function setSessionStatus(sess, status, atTime) {
+    if (!sess.entryDOM) return;
+    for (const s of SESSION_STATUSES) sess.entryDOM.classList.remove(`status-${s}`);
+    sess.entryDOM.classList.remove("pending");
+    sess.entryDOM.classList.add(`status-${status}`);
+    if (status === "pending") sess.entryDOM.classList.add("pending");
+    if (sess.statusTagEl) sess.statusTagEl.textContent = status;
+    sess.status = status;
+    if (status === "active") ensureDurationTicker();
+    if (TERMINAL_STATUSES.has(status) && sess.durEl && sess.endTime == null) {
+        // Freeze the live duration on first transition into a terminal state.
+        // For history replay, `atTime` is the event's timestamp so duration =
+        // event - start (not now - start). Subsequent terminal transitions
+        // (e.g. failed-start later stopped) keep the original end time.
+        const endTime = atTime != null ? atTime : Date.now();
+        sess.endTime = endTime;
+        sess.durEl.textContent = fmtDuration(endTime - sess.startTime);
+    }
+}
+
+function renderSessionEntry(sess) {
+    const wrap = el("div", { cls: "entry session pending status-pending" });
+    wrap.dataset.shellId = sess.shellId;
+    sess.entryDOM = wrap;
+
+    const header = el("div", { cls: "header-line" });
+    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
+    const iconInfo = TOOL_ICONS["powershell"];
+    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
+    iconEl.title = "powershell --mode=async (session)";
+    header.appendChild(iconEl);
+
+    const statusTag = el("span", { cls: "status-tag", text: "pending" });
+    header.appendChild(statusTag);
+    sess.statusTagEl = statusTag;
+
+    if (sess.description) {
+        header.appendChild(el("span", { cls: "desc", text: sess.description }));
+    } else if (sess.initialCommand) {
+        // Use the first non-empty line of the command as a fallback label.
+        const firstLine = sess.initialCommand.split("\n").map(s => s.trim()).find(Boolean) || "(session)";
+        header.appendChild(el("span", { cls: "desc", text: firstLine.slice(0, 80) }));
+    }
+
+    const shellChip = el("span", { cls: "shell-chip", text: `shell=${sess.shellId}` });
+    header.appendChild(shellChip);
+
+    header.appendChild(el("span", { cls: "ts", text: fmtTime(sess.startTime) }));
+    const dur = el("span", { cls: "dur", text: "" });
+    header.appendChild(dur);
+    sess.durEl = dur;
+
+    header.addEventListener("click", () => wrap.classList.toggle("collapsed"));
+    wrap.appendChild(header);
+
+    const transcriptSec = el("div", { cls: "section transcript-section" });
+    transcriptSec.appendChild(el("div", { cls: "section-label", text: "Transcript" }));
+    const transcriptEl = el("div", { cls: "transcript" });
+    transcriptSec.appendChild(transcriptEl);
+    wrap.appendChild(transcriptSec);
+    sess.transcriptEl = transcriptEl;
+
+    return wrap;
+}
+
+// Render a `list_powershell` event as a compact one-liner. The toggle
+// `opts.showListPowershell` controls visibility (off ⇒ entry has display:none
+// via the `.hide-list` body class; on ⇒ visible).
+function renderListEntry(callEv, resultEv) {
+    const wrap = el("div", { cls: "entry list-powershell" });
+    wrap.dataset.callId = String(callEv.id);
+
+    const header = el("div", { cls: "header-line" });
+    const iconEl = el("span", { cls: "tool-icon", text: TOOL_ICONS.list_powershell.icon });
+    iconEl.title = "list_powershell";
+    header.appendChild(iconEl);
+
+    // Try to extract the active session count from the result text. If we
+    // don't have a result yet, leave it as a plain "Listed sessions" label.
+    let label = "Listed sessions";
+    if (resultEv && typeof resultEv.output === "string") {
+        const lines = resultEv.output.split("\n").filter(Boolean);
+        if (/^\s*<no active shell sessions>/i.test(resultEv.output)) {
+            label = "Listed 0 active session(s)";
+        } else {
+            const activeCount = lines.filter((l) => /shellId\s*:/i.test(l)).length;
+            label = `Listed ${activeCount} active session(s)`;
+        }
+    }
+    header.appendChild(el("span", { cls: "desc", text: label }));
+    header.appendChild(el("span", { cls: "ts", text: fmtTime((resultEv || callEv).timestamp) }));
+
+    wrap.appendChild(header);
+    return wrap;
+}
+
+// Render a continuation event (write/read/stop) whose session start is
+// unknown. This is a small one-liner with a [shell=foo missing] chip.
+function renderOrphanContinuation(ev) {
+    const wrap = el("div", { cls: "entry orphan-continuation" });
+    const header = el("div", { cls: "header-line" });
+    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
+    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
+    iconEl.title = iconInfo.tip;
+    header.appendChild(iconEl);
+    const shellId = ev.args?.shellId || "?";
+    header.appendChild(el("span", { cls: "shell-chip missing", text: `shell=${shellId} missing` }));
+    header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
+    wrap.appendChild(header);
+    return wrap;
 }
 
 // --- Paired entry rendering -----------------------------------------------
@@ -164,8 +426,9 @@ function clearEmpty() {
 // see issue #2) push call+result back-to-back so the entry visually appears
 // already-resolved with no perceptible pending state.
 //
-// `entryByCallId` maps call event id → the entry's DOM node, so a result
-// event can locate the existing entry without scanning the DOM.
+// `entryByCallId` maps call event id → an upsert handler that knows what
+// the result event should do (e.g. update a paired entry, complete a
+// session start, fill in a read interaction, finalize a session stop).
 const entryByCallId = new Map();
 
 function inputBodyFor(ev) {
@@ -308,31 +571,256 @@ function appendOne(ev) {
     seenIds.add(ev.id);
     if (ev.id > lastSeenId) lastSeenId = ev.id;
 
-    if (ev.kind === "call") {
+    if (ev.kind === "call") return handleCall(ev);
+    if (ev.kind === "result") return handleResult(ev);
+}
+
+// --- Event router ----------------------------------------------------------
+// Classifies each `call` event into one of:
+//   - session-birth (powershell --mode=async): creates a session entry;
+//     registers an upsert that will fill in the start interaction's output
+//     and flip the session to ACTIVE when the result arrives.
+//   - session-continuation (write/read/stop with known shellId): appends a
+//     pending interaction to the existing session's transcript; registers
+//     an upsert that completes that interaction when the result arrives.
+//   - orphan-continuation (write/read/stop with unknown shellId): renders a
+//     compact one-liner.
+//   - list-powershell: renders a compact one-liner. If toggle is OFF, the
+//     entry is hidden via a body class (it still exists in DOM so re-toggling
+//     is instant).
+//   - regular pair (default): the existing renderPair / upsertResult flow.
+function handleCall(ev) {
+    if (ev.toolName === "list_powershell") {
         clearEmpty();
-        const node = renderPair(ev);
-        if (!opts.expandNew) node.classList.add("collapsed");
-        entryByCallId.set(ev.id, node);
+        const node = renderListEntry(ev, null);
         consoleEl.appendChild(node);
-        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        if (opts.autoscroll && opts.showListPowershell !== false) consoleEl.scrollTop = consoleEl.scrollHeight;
+        // Result handler: replace label with one carrying the parsed count.
+        entryByCallId.set(ev.id, (resultEv) => {
+            const repl = renderListEntry(ev, resultEv);
+            node.replaceWith(repl);
+        });
         return;
     }
 
-    if (ev.kind === "result") {
-        const existing = ev.forCallId != null ? entryByCallId.get(ev.forCallId) : null;
-        if (existing) {
-            // In-place upsert: no new DOM node, no scroll-to-bottom (the entry
-            // is already in the user's view from when the call was rendered).
-            upsertResult(ev);
+    if (isAsyncStart(ev)) {
+        let shellId = ev.args?.shellId || null;
+        // If shellId wasn't declared by the agent at call time, defer the
+        // session creation until the result arrives (we'll parse it from
+        // the output text).
+        if (!shellId) {
+            entryByCallId.set(ev.id, (resultEv) => {
+                const inferred = parseShellIdFromOutput(resultEv.output);
+                if (!inferred) {
+                    // Couldn't recover a shellId — fall back to rendering as a
+                    // regular paired entry so the call doesn't disappear.
+                    clearEmpty();
+                    const fallback = renderPair(ev);
+                    if (!opts.expandNew) fallback.classList.add("collapsed");
+                    consoleEl.appendChild(fallback);
+                    upsertResultInDOM(fallback, resultEv);
+                    return;
+                }
+                createSessionFromStart(ev, resultEv, inferred);
+            });
             return;
         }
-        // No matching call — render an orphan-result entry inline.
+        // shellId known at call time → create session now and let the result
+        // handler complete it.
         clearEmpty();
-        const node = upsertResult(ev);
-        if (!opts.expandNew) node.classList.add("collapsed");
-        consoleEl.appendChild(node);
+        const sess = ensureFreshSession(shellId, ev);
+        const startBlock = appendInteraction(sess, "start", ev, {
+            bodyText: ev.args?.command ?? "",
+            placeholder: undefined,
+        });
+        if (!opts.expandNew) sess.entryDOM.classList.add("collapsed");
+        consoleEl.appendChild(sess.entryDOM);
         if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        entryByCallId.set(ev.id, (resultEv) => completeSessionStart(sess, startBlock, resultEv));
         return;
+    }
+
+    // Continuations: write/read/stop with shellId
+    if (ev.toolName === "write_powershell" || ev.toolName === "read_powershell" || ev.toolName === "stop_powershell") {
+        const shellId = ev.args?.shellId;
+        const sess = shellId ? sessions.get(shellId) : null;
+        if (!sess || TERMINAL_STATUSES.has(sess.status)) {
+            // Orphan continuation (no known live session for this shellId).
+            clearEmpty();
+            const node = renderOrphanContinuation(ev);
+            consoleEl.appendChild(node);
+            if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+            // Defensive: a result may still arrive; ignore it (no upsert needed
+            // for the orphan one-liner).
+            return;
+        }
+        const interactionKind = ev.toolName.replace(/_powershell$/, "");
+        const interactionBlock = handleSessionContinuationCall(sess, interactionKind, ev);
+        if (interactionBlock) {
+            entryByCallId.set(ev.id, (resultEv) => completeContinuation(sess, interactionKind, interactionBlock, resultEv));
+        }
+        return;
+    }
+
+    // Default: regular paired entry.
+    clearEmpty();
+    const node = renderPair(ev);
+    if (!opts.expandNew) node.classList.add("collapsed");
+    consoleEl.appendChild(node);
+    if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+    entryByCallId.set(ev.id, (resultEv) => upsertResultInDOM(node, resultEv));
+}
+
+function handleResult(ev) {
+    const callId = ev.forCallId;
+    const handler = callId != null ? entryByCallId.get(callId) : null;
+    if (handler) {
+        try { handler(ev); } catch (e) { /* best-effort */ }
+        entryByCallId.delete(callId);
+        return;
+    }
+    // No matching call — fall back to a minimal orphan-result entry so the
+    // result doesn't disappear silently.
+    clearEmpty();
+    const node = upsertResult(ev);
+    if (!opts.expandNew) node.classList.add("collapsed");
+    consoleEl.appendChild(node);
+    if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+function ensureFreshSession(shellId, ev) {
+    const existing = sessions.get(shellId);
+    // If a previous session with this shellId is still alive, keep it (rare —
+    // would mean the agent re-issued an async start without stopping first).
+    if (existing && !TERMINAL_STATUSES.has(existing.status)) return existing;
+    // Re-use of a stopped/terminal shellId → create a fresh session, leave the
+    // old entry in the timeline as historical. Re-keying on a Map preserves
+    // insertion order for eviction, so re-insert.
+    if (existing) sessions.delete(shellId);
+    const sess = {
+        shellId,
+        startEventId: ev.id,
+        startTime: ev.timestamp,
+        endTime: null,
+        status: "pending",
+        initialCommand: ev.args?.command ?? "",
+        description: ev.args?.description ?? "",
+        transcriptCount: 0,
+        truncationMarker: null,
+        startBlock: null,
+        transcriptEl: null,
+        statusTagEl: null,
+        durEl: null,
+        entryDOM: null,
+    };
+    sessions.set(shellId, sess);
+    sess.entryDOM = renderSessionEntry(sess);
+    evictOldSessions();
+    return sess;
+}
+
+function createSessionFromStart(callEv, resultEv, shellId) {
+    clearEmpty();
+    const sess = ensureFreshSession(shellId, callEv);
+    const startBlock = appendInteraction(sess, "start", callEv, {
+        bodyText: callEv.args?.command ?? "",
+    });
+    if (!opts.expandNew) sess.entryDOM.classList.add("collapsed");
+    consoleEl.appendChild(sess.entryDOM);
+    if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+    completeSessionStart(sess, startBlock, resultEv);
+}
+
+function completeSessionStart(sess, startBlock, resultEv) {
+    const status = statusFromResult(resultEv);
+    if (status === "success") {
+        setSessionStatus(sess, "active");
+    } else {
+        setSessionStatus(sess, status, resultEv?.timestamp);
+    }
+    if (startBlock && resultEv?.output != null) {
+        // Append output to the start block as a sub-body.
+        const body = el("div", { cls: "interaction-body interaction-output" });
+        body.textContent = resultEv.output;
+        startBlock.appendChild(body);
+        startBlock._outputEl = body;
+    }
+}
+
+function handleSessionContinuationCall(sess, kind, ev) {
+    if (kind === "write") {
+        const block = appendInteraction(sess, "write", ev, {
+            bodyText: ev.args?.input ?? "",
+            metaText: ev.args?.delay != null ? `delay=${ev.args.delay}s` : null,
+        });
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        return block;
+    }
+    if (kind === "read") {
+        const block = appendInteraction(sess, "read", ev, {
+            placeholder: "(reading…)",
+            metaText: ev.args?.delay != null ? `delay=${ev.args.delay}s` : null,
+        });
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        return block;
+    }
+    if (kind === "stop") {
+        const block = appendInteraction(sess, "stop", ev, { placeholder: "(stopping…)" });
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        return block;
+    }
+    return null;
+}
+
+function completeContinuation(sess, kind, block, resultEv) {
+    if (!block) return;
+    if (kind === "write") {
+        // Write results are usually empty / housekeeping. We may attach a
+        // small note if the tool returned text, but otherwise leave the
+        // already-shown input in place.
+        if (resultEv?.output && resultEv.output.trim()) {
+            const out = el("div", { cls: "interaction-body interaction-output" });
+            out.textContent = resultEv.output;
+            block.appendChild(out);
+        }
+        return;
+    }
+    if (kind === "read") {
+        if (block._bodyEl) {
+            block._bodyEl.classList.remove("interaction-pending");
+            block._bodyEl.textContent = resultEv.output || "(no output)";
+        }
+        return;
+    }
+    if (kind === "stop") {
+        if (block._bodyEl) {
+            block._bodyEl.classList.remove("interaction-pending");
+            // Stop usually just yields a confirmation; show text if present,
+            // otherwise hide the placeholder body entirely.
+            if (resultEv?.output && resultEv.output.trim()) {
+                block._bodyEl.textContent = resultEv.output;
+            } else {
+                block._bodyEl.remove();
+                block._bodyEl = null;
+            }
+        }
+        setSessionStatus(sess, "stopped", resultEv.timestamp);
+        return;
+    }
+}
+
+// In-place result upsert against an existing pair entry (used both for the
+// regular paired flow's call→result transition AND for the deferred fallback
+// when an async-start can't be classified as a session).
+function upsertResultInDOM(wrap, ev) {
+    const status = ev.status || "success";
+    wrap.classList.remove("pending");
+    wrap.classList.add(`status-${status}`);
+    if (wrap._statusTag) wrap._statusTag.textContent = status;
+    if (wrap._dur) wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
+    if (wrap._outputBody) {
+        wrap._outputBody.classList.remove("output-pending");
+        wrap._outputBody.textContent = ev.output || "(no output)";
     }
 }
 
@@ -429,6 +917,7 @@ const TOGGLES = [
     { key: "autoscroll", label: "Auto-scroll", apply: () => {} },
     { key: "wrap",       label: "Wrap",        apply: () => consoleEl.classList.toggle("wrap", opts.wrap) },
     { key: "expandNew",  label: "Expand new entries", apply: () => {} },
+    { key: "showListPowershell", label: "Show list_powershell entries", apply: () => consoleEl.classList.toggle("hide-list", !opts.showListPowershell) },
 ];
 
 function renderContextMenu() {

@@ -19,8 +19,12 @@ every call to:
 - `stop_powershell`
 - `list_powershell`
 
-Each command is shown with a `PS>` prompt block, and each result is shown
-with a colour-coded status tag (`success`, `failure`, `rejected`, `denied`).
+Each command is shown with a colour-coded status tag (`success`, `failure`,
+`rejected`, `denied`, plus a pulsing grey `pending` while the result is in
+flight). Calls and results are paired into a single collapsible entry,
+with the input text under "Input" and the captured output under "Output".
+
+Async sessions get special treatment: see [Sessions](#sessions) below.
 
 ## Requirements
 
@@ -126,6 +130,33 @@ The extension also registers three tools the agent can use directly:
 - `ps_console_view_show` — open or focus the window
 - `ps_console_view_eval` — run JS inside the page
 - `ps_console_view_close` — close the window
+
+## Sessions
+
+When Copilot starts a long-running shell with `powershell --mode=async`, the
+console renders it as a **session entry** instead of a simple paired entry.
+Subsequent `write_powershell`, `read_powershell`, and `stop_powershell` calls
+that target the same `shellId` are folded into the session's body as a
+**transcript** — one labelled line per interaction:
+
+- `▶ Started` — the initial command and its captured startup output
+- `→ Sent` — input written into the session
+- `◉ Read` — output read back from the session
+- `⏹ Stopped` — when the session is explicitly stopped
+
+The header shows a status tag (`pending` → `active` → `stopped`), the
+`shell=<id>` chip, the start time, and a live duration that ticks while
+the session is `active` and freezes once it stops.
+
+`list_powershell` calls render as a single-line entry (`☰ Listed N active
+session(s)`). To declutter, right-click → **✓ Show list_powershell entries**
+toggles them off for the current session.
+
+If a `write_powershell`/`read_powershell`/`stop_powershell` call references
+a `shellId` whose start was never observed (extension reloaded mid-session,
+history aged out, etc.), it renders as an "orphan continuation" mini-entry
+tagged with the missing shellId rather than crashing or being attached to
+an unrelated session.
 
 ## Themes
 
