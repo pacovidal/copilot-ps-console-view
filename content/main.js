@@ -106,6 +106,32 @@ function fmtTime(ts) {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// Format a duration in milliseconds as a compact human label.
+//   < 1000ms → "Xms"
+//   < 60s   → "Xs"
+//   ≥ 60s   → "Xm Ys"
+function fmtDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const totalSeconds = Math.floor(ms / 1000);
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}m ${s}s`;
+}
+
+// Per-tool icon glyph + tooltip (the original tool name). Icons are basic
+// Unicode geometric/punctuation glyphs that render reliably without depending
+// on emoji fonts. Tooltip on hover surfaces the actual tool name so the
+// mapping is discoverable.
+const TOOL_ICONS = {
+    powershell:       { icon: "▶", tip: "powershell" },
+    write_powershell: { icon: "✎", tip: "write_powershell" },
+    read_powershell:  { icon: "◉", tip: "read_powershell" },
+    stop_powershell:  { icon: "⏹", tip: "stop_powershell" },
+    list_powershell:  { icon: "☰", tip: "list_powershell" },
+};
+
 function el(tag, opts = {}) {
     const e = document.createElement(tag);
     if (opts.cls) e.className = opts.cls;
@@ -118,6 +144,8 @@ function showEmpty() {
     const e = el("div", { cls: "empty", text: "Waiting for Copilot to run a PowerShell command…" });
     consoleEl.appendChild(e);
     empty = true;
+    // Forget any in-progress upserts since the DOM was wiped.
+    entryByCallId.clear();
 }
 
 function clearEmpty() {
@@ -127,39 +155,30 @@ function clearEmpty() {
     }
 }
 
-function makeHeader(initialChildren = []) {
-    const header = el("div", { cls: "header-line" });
-    const chevron = el("span", { cls: "chevron", text: "▸" });
-    header.appendChild(chevron);
-    for (const child of initialChildren) header.appendChild(child);
-    header.addEventListener("click", () => {
-        header.parentElement.classList.toggle("collapsed");
-    });
-    return header;
+// --- Paired entry rendering -----------------------------------------------
+//
+// Each call/result PAIR renders as a single DOM entry. The call event
+// creates a "Pending" entry with empty Output; the matching result event
+// (matched by `forCallId`) upserts the existing entry — flipping the status,
+// filling in duration + output. Synthesized pairs (extension reload mid-loop;
+// see issue #2) push call+result back-to-back so the entry visually appears
+// already-resolved with no perceptible pending state.
+//
+// `entryByCallId` maps call event id → the entry's DOM node, so a result
+// event can locate the existing entry without scanning the DOM.
+const entryByCallId = new Map();
+
+function inputBodyFor(ev) {
+    const a = ev.args || {};
+    if (ev.toolName === "powershell") return a.command ?? "";
+    if (ev.toolName === "write_powershell") return a.input ?? "";
+    if (ev.toolName === "read_powershell") return "(read buffered output)";
+    if (ev.toolName === "stop_powershell") return "(stop session)";
+    if (ev.toolName === "list_powershell") return "(list sessions)";
+    return JSON.stringify(a, null, 2);
 }
 
-function renderCall(ev) {
-    const wrap = el("div", { cls: ev.synthetic ? "entry call synthetic" : "entry call" });
-    const headerChildren = [el("span", { cls: "tool", text: ev.toolName })];
-    if (ev.args?.description) {
-        headerChildren.push(el("span", { cls: "desc", text: ev.args.description }));
-    }
-    if (ev.synthetic) {
-        // Subtle marker so the user knows this entry is reconstructed from the
-        // post hook (the live "running" state was missed — usually because the
-        // CLI host's hooks snapshot didn't refresh after an extensions_reload
-        // mid-loop). We render it as a small diamond rather than a tag to
-        // avoid drawing too much attention.
-        const tag = el("span", { cls: "synthetic-tag", text: "◇" });
-        tag.title = "Reconstructed: pre-hook was lost (likely an extension reload during the agent's tool-execution loop). The command did run; only the live 'running' state was missed.";
-        headerChildren.push(tag);
-    }
-    headerChildren.push(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
-    const header = makeHeader(headerChildren);
-
-    // Tool-call metadata (shellId, mode, detached, initial_wait, delay) is
-    // exposed as the header's tooltip rather than a dedicated visible row —
-    // it's reference info, not something the eye needs at all times.
+function metaTooltipFor(ev) {
     const a = ev.args || {};
     const meta = [];
     if (a.shellId) meta.push(`shell=${a.shellId}`);
@@ -167,52 +186,153 @@ function renderCall(ev) {
     if (a.detach) meta.push("detached");
     if (a.initial_wait != null) meta.push(`wait=${a.initial_wait}s`);
     if (a.delay != null) meta.push(`delay=${a.delay}s`);
-    if (meta.length) header.title = meta.join("  ·  ");
+    return meta.length ? meta.join("  ·  ") : "";
+}
+
+// Renders the skeleton entry for a `call` event. Status starts as "pending";
+// a later `upsertResult` call flips it.
+function renderPair(ev) {
+    const wrap = el("div", { cls: "entry pair pending" });
+    if (ev.synthetic) wrap.classList.add("synthetic");
+    wrap.dataset.callId = String(ev.id);
+
+    const header = el("div", { cls: "header-line" });
+    const chevron = el("span", { cls: "chevron", text: "▸" });
+    header.appendChild(chevron);
+
+    // Tool icon (clickable target shares the chevron's role; the icon's title
+    // attribute lets users discover the underlying tool name).
+    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
+    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
+    iconEl.title = iconInfo.tip;
+    header.appendChild(iconEl);
+
+    if (ev.synthetic) {
+        const tag = el("span", { cls: "synthetic-tag", text: "◇" });
+        tag.title = "Reconstructed: pre-hook was lost (likely an extension reload during the agent's tool-execution loop). The command did run; only the live 'running' state was missed.";
+        header.appendChild(tag);
+    }
+
+    const statusTag = el("span", { cls: "status-tag", text: "pending" });
+    header.appendChild(statusTag);
+
+    if (ev.args?.description) {
+        header.appendChild(el("span", { cls: "desc", text: ev.args.description }));
+    }
+
+    const ts = el("span", { cls: "ts", text: fmtTime(ev.timestamp) });
+    header.appendChild(ts);
+
+    const dur = el("span", { cls: "dur", text: "" });
+    header.appendChild(dur);
+
+    const metaTip = metaTooltipFor(ev);
+    if (metaTip) header.title = metaTip;
+    header.addEventListener("click", () => {
+        wrap.classList.toggle("collapsed");
+    });
     wrap.appendChild(header);
 
-    let body = "";
-    if (ev.toolName === "powershell") body = a.command ?? "";
-    else if (ev.toolName === "write_powershell") body = a.input ?? "";
-    else if (ev.toolName === "read_powershell") body = "(read buffered output)";
-    else if (ev.toolName === "stop_powershell") body = "(stop session)";
-    else if (ev.toolName === "list_powershell") body = "(list sessions)";
-    else body = JSON.stringify(a, null, 2);
-
-    const cmd = el("div", { cls: "cmd" });
+    // Body: two sections (Input / Output) stacked. Both shown when expanded;
+    // hidden together when the entry is collapsed (existing rule).
+    const inputSec = el("div", { cls: "section input-section" });
+    inputSec.appendChild(el("div", { cls: "section-label", text: "Input" }));
+    const inputBody = el("div", { cls: "section-body input-body" });
     const prompt = el("span", { cls: "prompt", text: "PS> " });
-    cmd.appendChild(prompt);
-    cmd.appendChild(document.createTextNode(body));
-    wrap.appendChild(cmd);
+    inputBody.appendChild(prompt);
+    inputBody.appendChild(document.createTextNode(inputBodyFor(ev)));
+    inputSec.appendChild(inputBody);
+    wrap.appendChild(inputSec);
+
+    const outputSec = el("div", { cls: "section output-section" });
+    outputSec.appendChild(el("div", { cls: "section-label", text: "Output" }));
+    const outputBody = el("div", { cls: "section-body output-body output-pending", text: "waiting for result…" });
+    outputSec.appendChild(outputBody);
+    wrap.appendChild(outputSec);
+
+    // Cache fields the upsert needs without re-querying the DOM.
+    wrap._statusTag = statusTag;
+    wrap._dur = dur;
+    wrap._outputBody = outputBody;
+    wrap._callTs = ev.timestamp;
 
     return wrap;
 }
 
-function renderResult(ev) {
-    const status = ev.status || "success";
-    const wrap = el("div", { cls: `entry result ${status}` });
-    wrap.appendChild(makeHeader([
-        el("span", { cls: "status-tag", text: status }),
-        el("span", { cls: "tool", text: `← ${ev.toolName}` }),
-        el("span", { cls: "ts", text: fmtTime(ev.timestamp) }),
-    ]));
+// Receives a `result` event and updates the existing pair entry (matched by
+// `forCallId`). If the matching entry isn't found (e.g. Clear was clicked
+// between the call and the result, or this page is replaying history that
+// was partially evicted), we render the result as its own minimal entry.
+function upsertResult(ev) {
+    const callId = ev.forCallId;
+    const wrap = callId != null ? entryByCallId.get(callId) : null;
 
-    const body = el("div", { cls: "body", text: ev.output || "(no output)" });
-    wrap.appendChild(body);
-    return wrap;
+    if (wrap) {
+        const status = ev.status || "success";
+        wrap.classList.remove("pending");
+        wrap.classList.add(`status-${status}`);
+        wrap._statusTag.textContent = status;
+        wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
+        const outputBody = wrap._outputBody;
+        outputBody.classList.remove("output-pending");
+        outputBody.textContent = ev.output || "(no output)";
+        if (callId != null) entryByCallId.delete(callId);
+        return wrap;
+    }
+
+    // Standalone result with no matching call — should be rare given the
+    // synthesis-on-orphan path in main.mjs always creates a call first, but
+    // defensively render a minimal single-section entry so nothing goes
+    // missing.
+    const status = ev.status || "success";
+    const orphan = el("div", { cls: `entry pair status-${status} orphan-result` });
+    const header = el("div", { cls: "header-line" });
+    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
+    const iconInfo = TOOL_ICONS[ev.toolName] || { icon: "•", tip: ev.toolName };
+    const iconEl = el("span", { cls: "tool-icon", text: iconInfo.icon });
+    iconEl.title = iconInfo.tip;
+    header.appendChild(iconEl);
+    header.appendChild(el("span", { cls: "status-tag", text: status }));
+    header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
+    header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
+    orphan.appendChild(header);
+    const outputSec = el("div", { cls: "section output-section" });
+    outputSec.appendChild(el("div", { cls: "section-label", text: "Output" }));
+    outputSec.appendChild(el("div", { cls: "section-body output-body", text: ev.output || "(no output)" }));
+    orphan.appendChild(outputSec);
+    return orphan;
 }
 
 function appendOne(ev) {
     if (!ev || seenIds.has(ev.id)) return;
     seenIds.add(ev.id);
     if (ev.id > lastSeenId) lastSeenId = ev.id;
-    clearEmpty();
 
-    const node = ev.kind === "result" ? renderResult(ev) : renderCall(ev);
-    if (!opts.expandNew) node.classList.add("collapsed");
-    consoleEl.appendChild(node);
+    if (ev.kind === "call") {
+        clearEmpty();
+        const node = renderPair(ev);
+        if (!opts.expandNew) node.classList.add("collapsed");
+        entryByCallId.set(ev.id, node);
+        consoleEl.appendChild(node);
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        return;
+    }
 
-    if (opts.autoscroll) {
-        consoleEl.scrollTop = consoleEl.scrollHeight;
+    if (ev.kind === "result") {
+        const existing = ev.forCallId != null ? entryByCallId.get(ev.forCallId) : null;
+        if (existing) {
+            // In-place upsert: no new DOM node, no scroll-to-bottom (the entry
+            // is already in the user's view from when the call was rendered).
+            upsertResult(ev);
+            return;
+        }
+        // No matching call — render an orphan-result entry inline.
+        clearEmpty();
+        const node = upsertResult(ev);
+        if (!opts.expandNew) node.classList.add("collapsed");
+        consoleEl.appendChild(node);
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+        return;
     }
 }
 
