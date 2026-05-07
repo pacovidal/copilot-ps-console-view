@@ -161,14 +161,11 @@ footer #status {
 .entry .shell-chip.missing { font-style: italic; color: var(--accent-warn); border-color: var(--accent-warn); }
 
 .entry .transcript-section .transcript {
-  padding: 4px 10px 6px;
-  background: var(--bg-result);
-  border-left: 3px solid var(--accent-cmd);
+  padding: 4px 0 6px;
+  background: transparent;
+  border-left: none;
   color: var(--fg);
 }
-.entry.session.status-active  .transcript-section .transcript { border-left-color: var(--accent-success); }
-.entry.session.status-stopped .transcript-section .transcript { border-left-color: var(--fg-dim); }
-.entry.session.status-failure .transcript-section .transcript { border-left-color: var(--accent-failure); color: var(--accent-failure); }
 
 .entry .interaction { margin: 4px 0; }
 .entry .interaction:first-child { margin-top: 0; }
@@ -186,14 +183,36 @@ footer #status {
 .entry .interaction-label { color: var(--fg-strong); font-weight: 600; }
 .entry .interaction-ts { color: var(--fg-dim); }
 .entry .interaction-meta { color: var(--fg-dim); margin-left: auto; }
+
+/* Per-interaction body. The colored bar + background mirror the paired
+   entry's input/output sections so both rendering modes look uniform. */
 .entry .interaction-body {
-  margin-top: 2px;
-  padding: 2px 0 2px 1.6em;
-  color: var(--fg-cmd);
+  margin: 2px 0 0 1.6em;
+  padding: 4px 10px;
   white-space: pre;
+  border-left: 3px solid var(--accent-cmd);
 }
-.entry .interaction-body.interaction-pending { color: var(--fg-dim); font-style: italic; }
-.entry .interaction-body.interaction-output { color: var(--fg); }
+.entry .interaction-body.interaction-input {
+  background: var(--bg-cmd);
+  border-left-color: var(--accent-cmd);
+  color: var(--fg-cmd);
+}
+.entry .interaction-input .prompt { color: var(--accent-cmd); user-select: none; }
+.entry .interaction-body.interaction-output {
+  background: var(--bg-result);
+  border-left-color: var(--accent-success);
+  color: var(--fg);
+}
+.entry .interaction-body.interaction-status-failure  { border-left-color: var(--accent-failure); color: var(--accent-failure); }
+.entry .interaction-body.interaction-status-rejected,
+.entry .interaction-body.interaction-status-denied   { border-left-color: var(--accent-warn);    color: var(--accent-warn); }
+.entry .interaction-body.interaction-status-unknown  { border-left-color: var(--fg-dim);         color: var(--fg-dim); }
+.entry .interaction-body.interaction-pending {
+  color: var(--fg-dim);
+  font-style: italic;
+  border-left-color: var(--fg-dim);
+  background: transparent;
+}
 .entry .interaction.truncated {
   font-size: 10px; color: var(--fg-dim); font-style: italic;
   padding: 2px 0 4px 1.6em;

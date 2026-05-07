@@ -235,6 +235,15 @@ function statusFromResult(ev) {
 // Append one interaction sub-block to a session's transcript. Returns the
 // DOM node so the caller can update it later (e.g. fill in a read's output
 // when the result arrives, or set status on stop completion).
+//
+// `extra` options:
+//   - bodyText:    initial body text (mutually exclusive with placeholder)
+//   - placeholder: italic dim "(reading…)" text for pre-result blocks
+//   - bodyKind:    "input" or "output" (defaults to "input" for start/write,
+//                  "output" for read/stop). Drives the colored bar style so
+//                  it matches the paired-entry input/output sections.
+//   - withPrompt:  when true, prepend "PS> " to the body (start interaction).
+//   - metaText:    small dim tag rendered on the right of the head line.
 function appendInteraction(sess, kind, ev, extra = {}) {
     if (!sess.transcriptEl) return null;
 
@@ -253,11 +262,21 @@ function appendInteraction(sess, kind, ev, extra = {}) {
     // Body (optional). Caller can pass `bodyText` for the initial display
     // and later mutate `block._bodyEl.textContent`.
     if (extra.bodyText != null || extra.placeholder) {
-        const body = el("div", { cls: "interaction-body" });
-        if (extra.bodyText != null) body.textContent = extra.bodyText;
-        else { body.classList.add("interaction-pending"); body.textContent = extra.placeholder; }
+        const flavour = extra.bodyKind || (kind === "read" || kind === "stop" ? "output" : "input");
+        const body = el("div", { cls: `interaction-body interaction-${flavour}` });
+        if (extra.withPrompt) {
+            body.appendChild(el("span", { cls: "prompt", text: "PS> " }));
+            body.appendChild(document.createTextNode(extra.bodyText != null ? extra.bodyText : extra.placeholder));
+            if (extra.bodyText == null) body.classList.add("interaction-pending");
+        } else if (extra.bodyText != null) {
+            body.textContent = extra.bodyText;
+        } else {
+            body.classList.add("interaction-pending");
+            body.textContent = extra.placeholder;
+        }
         block.appendChild(body);
         block._bodyEl = body;
+        block._bodyFlavour = flavour;
     }
 
     sess.transcriptEl.appendChild(block);
@@ -286,6 +305,18 @@ function appendInteraction(sess, kind, ev, extra = {}) {
         }
     }
     return block;
+}
+
+// Replace just the text content of an interaction body without disturbing
+// the leading "PS> " prompt (if any) or its colored-bar styling.
+function setInteractionBodyText(block, text) {
+    if (!block || !block._bodyEl) return;
+    const body = block._bodyEl;
+    body.classList.remove("interaction-pending");
+    const prompt = body.querySelector(".prompt");
+    body.textContent = "";
+    if (prompt) body.appendChild(prompt);
+    body.appendChild(document.createTextNode(text));
 }
 
 const INTERACTION_MARKERS = {
@@ -362,7 +393,6 @@ function renderSessionEntry(sess) {
     wrap.appendChild(header);
 
     const transcriptSec = el("div", { cls: "section transcript-section" });
-    transcriptSec.appendChild(el("div", { cls: "section-label", text: "Transcript" }));
     const transcriptEl = el("div", { cls: "transcript" });
     transcriptSec.appendChild(transcriptEl);
     wrap.appendChild(transcriptSec);
@@ -498,9 +528,10 @@ function renderPair(ev) {
     wrap.appendChild(header);
 
     // Body: two sections (Input / Output) stacked. Both shown when expanded;
-    // hidden together when the entry is collapsed (existing rule).
+    // hidden together when the entry is collapsed (existing rule). Section
+    // labels are intentionally absent — the PS> prompt + status-tinted left
+    // border on each section convey the input/output distinction.
     const inputSec = el("div", { cls: "section input-section" });
-    inputSec.appendChild(el("div", { cls: "section-label", text: "Input" }));
     const inputBody = el("div", { cls: "section-body input-body" });
     const prompt = el("span", { cls: "prompt", text: "PS> " });
     inputBody.appendChild(prompt);
@@ -509,7 +540,6 @@ function renderPair(ev) {
     wrap.appendChild(inputSec);
 
     const outputSec = el("div", { cls: "section output-section" });
-    outputSec.appendChild(el("div", { cls: "section-label", text: "Output" }));
     const outputBody = el("div", { cls: "section-body output-body output-pending", text: "waiting for result…" });
     outputSec.appendChild(outputBody);
     wrap.appendChild(outputSec);
@@ -561,7 +591,6 @@ function upsertResult(ev) {
     header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
     orphan.appendChild(header);
     const outputSec = el("div", { cls: "section output-section" });
-    outputSec.appendChild(el("div", { cls: "section-label", text: "Output" }));
     outputSec.appendChild(el("div", { cls: "section-body output-body", text: ev.output || "(no output)" }));
     orphan.appendChild(outputSec);
     return orphan;
@@ -632,7 +661,7 @@ function handleCall(ev) {
         const sess = ensureFreshSession(shellId, ev);
         const startBlock = appendInteraction(sess, "start", ev, {
             bodyText: ev.args?.command ?? "",
-            placeholder: undefined,
+            withPrompt: true,
         });
         if (!opts.expandNew) sess.entryDOM.classList.add("collapsed");
         consoleEl.appendChild(sess.entryDOM);
@@ -725,6 +754,7 @@ function createSessionFromStart(callEv, resultEv, shellId) {
     const sess = ensureFreshSession(shellId, callEv);
     const startBlock = appendInteraction(sess, "start", callEv, {
         bodyText: callEv.args?.command ?? "",
+        withPrompt: true,
     });
     if (!opts.expandNew) sess.entryDOM.classList.add("collapsed");
     consoleEl.appendChild(sess.entryDOM);
@@ -740,12 +770,19 @@ function completeSessionStart(sess, startBlock, resultEv) {
         setSessionStatus(sess, status, resultEv?.timestamp);
     }
     if (startBlock && resultEv?.output != null) {
-        // Append output to the start block as a sub-body.
-        const body = el("div", { cls: "interaction-body interaction-output" });
-        body.textContent = resultEv.output;
-        startBlock.appendChild(body);
-        startBlock._outputEl = body;
+        appendOutputSubBody(startBlock, resultEv.output, status);
     }
+}
+
+// Append an output sub-body to an interaction block and stamp it with the
+// result's status so the colored bar mirrors the paired-entry output style.
+function appendOutputSubBody(block, text, status) {
+    const cls = `interaction-body interaction-output interaction-status-${status || "success"}`;
+    const body = el("div", { cls });
+    body.textContent = text;
+    block.appendChild(body);
+    block._outputEl = body;
+    return body;
 }
 
 function handleSessionContinuationCall(sess, kind, ev) {
@@ -775,31 +812,35 @@ function handleSessionContinuationCall(sess, kind, ev) {
 
 function completeContinuation(sess, kind, block, resultEv) {
     if (!block) return;
+    const status = statusFromResult(resultEv);
     if (kind === "write") {
         // Write results are usually empty / housekeeping. We may attach a
         // small note if the tool returned text, but otherwise leave the
         // already-shown input in place.
         if (resultEv?.output && resultEv.output.trim()) {
-            const out = el("div", { cls: "interaction-body interaction-output" });
-            out.textContent = resultEv.output;
-            block.appendChild(out);
+            appendOutputSubBody(block, resultEv.output, status);
         }
         return;
     }
     if (kind === "read") {
         if (block._bodyEl) {
+            // The read body is already output-flavoured (created by
+            // appendInteraction's kind→flavour map); just fill in the text and
+            // tag with the result status so the bar colour matches.
             block._bodyEl.classList.remove("interaction-pending");
-            block._bodyEl.textContent = resultEv.output || "(no output)";
+            block._bodyEl.classList.add(`interaction-status-${status}`);
+            setInteractionBodyText(block, resultEv.output || "(no output)");
         }
         return;
     }
     if (kind === "stop") {
         if (block._bodyEl) {
             block._bodyEl.classList.remove("interaction-pending");
+            block._bodyEl.classList.add(`interaction-status-${status}`);
             // Stop usually just yields a confirmation; show text if present,
             // otherwise hide the placeholder body entirely.
             if (resultEv?.output && resultEv.output.trim()) {
-                block._bodyEl.textContent = resultEv.output;
+                setInteractionBodyText(block, resultEv.output);
             } else {
                 block._bodyEl.remove();
                 block._bodyEl = null;
