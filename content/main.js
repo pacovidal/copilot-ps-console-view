@@ -376,12 +376,13 @@ function renderSessionEntry(sess) {
     sess.entryDOM = wrap;
 
     const header = el("div", { cls: "header-line" });
-    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
 
     const statusTag = el("span", { cls: "status-tag" });
     statusTag.title = "pending";
     header.appendChild(statusTag);
     sess.statusTagEl = statusTag;
+
+    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
 
     if (sess.description) {
         header.appendChild(el("span", { cls: "desc", text: sess.description }));
@@ -497,6 +498,11 @@ function renderPair(ev) {
     wrap.dataset.callId = String(ev.id);
 
     const header = el("div", { cls: "header-line" });
+
+    const statusTag = el("span", { cls: "status-tag" });
+    statusTag.title = "pending";
+    header.appendChild(statusTag);
+
     const chevron = el("span", { cls: "chevron", text: "▸" });
     header.appendChild(chevron);
 
@@ -505,10 +511,6 @@ function renderPair(ev) {
         tag.title = "Reconstructed: pre-hook was lost (likely an extension reload during the agent's tool-execution loop). The command did run; only the live 'running' state was missed.";
         header.appendChild(tag);
     }
-
-    const statusTag = el("span", { cls: "status-tag" });
-    statusTag.title = "pending";
-    header.appendChild(statusTag);
 
     if (ev.args?.description) {
         header.appendChild(el("span", { cls: "desc", text: ev.args.description }));
@@ -581,10 +583,10 @@ function upsertResult(ev) {
     const status = ev.status || "success";
     const orphan = el("div", { cls: `entry pair status-${status} orphan-result` });
     const header = el("div", { cls: "header-line" });
-    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
     const statusTag = el("span", { cls: "status-tag" });
     statusTag.title = status;
     header.appendChild(statusTag);
+    header.appendChild(el("span", { cls: "chevron", text: "▸" }));
     header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
     header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
     orphan.appendChild(header);
