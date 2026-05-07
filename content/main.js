@@ -814,54 +814,62 @@ function handleSessionContinuationCall(sess, kind, ev) {
     return null;
 }
 
+// Compute what to display for a tool result whose output is a full session
+// buffer snapshot. Returns the text to render (trimmed of any prefix we've
+// already shown), the lifecycle tooltip extracted from the CLI trailer, and
+// a flag indicating the result is "no new content". Always advances
+// `sess.lastSeenBuffer` to the new full buffer so subsequent calls slice
+// against the latest state.
+function deltaAgainstSession(sess, raw) {
+    const { body: cleanCurr, tooltip } = splitCliTrailer(raw || "");
+    const prev = sess.lastSeenBuffer || "";
+    let displayText;
+    let isPlaceholder = false;
+    if (prev && cleanCurr.startsWith(prev)) {
+        const tail = cleanCurr.slice(prev.length);
+        if (tail.replace(/\s/g, "") === "") {
+            displayText = "(no new output)";
+            isPlaceholder = true;
+        } else {
+            displayText = tail;
+        }
+    } else if (cleanCurr) {
+        displayText = cleanCurr;
+    } else {
+        displayText = "(no output)";
+        isPlaceholder = true;
+    }
+    sess.lastSeenBuffer = cleanCurr;
+    return { displayText, tooltip, isPlaceholder };
+}
+
 function completeContinuation(sess, kind, block, resultEv) {
     if (!block) return;
     const status = statusFromResult(resultEv);
     if (kind === "write") {
-        // Write results are usually empty / housekeeping. We may attach a
-        // small note if the tool returned text, but otherwise leave the
-        // already-shown input in place.
+        // Write returns the FULL session buffer too — dedup against what
+        // we've already shown so the user only sees the new tail.
         if (resultEv?.output && resultEv.output.trim()) {
-            appendOutputSubBody(block, resultEv.output, status);
-            // Update the dedup buffer — write returns the full session
-            // buffer so far, just like read does.
-            sess.lastSeenBuffer = splitCliTrailer(resultEv.output).body;
+            const { displayText, tooltip, isPlaceholder } = deltaAgainstSession(sess, resultEv.output);
+            const cls = `interaction-body interaction-output interaction-status-${status}`
+                + (isPlaceholder ? " interaction-pending" : "");
+            const body = el("div", { cls });
+            body.textContent = displayText;
+            if (tooltip) body.title = tooltip;
+            block.appendChild(body);
+            block._outputEl = body;
         }
         return;
     }
     if (kind === "read") {
         if (block._bodyEl) {
-            const raw = resultEv?.output || "";
-            const { body: cleanCurr, tooltip } = splitCliTrailer(raw);
-            const prev = sess.lastSeenBuffer || "";
-            // The CLI returns the FULL session buffer on every read. If it
-            // strictly extends what we've already shown, display only the
-            // new tail; otherwise show full (the buffer was reset/trimmed).
-            let displayText;
-            let isPlaceholder = false;
-            if (prev && cleanCurr.startsWith(prev)) {
-                const tail = cleanCurr.slice(prev.length);
-                if (tail.replace(/\s/g, "") === "") {
-                    displayText = "(no new output since last read)";
-                    isPlaceholder = true;
-                } else {
-                    displayText = tail;
-                }
-            } else if (cleanCurr) {
-                displayText = cleanCurr;
-            } else {
-                displayText = "(no output)";
-                isPlaceholder = true;
-            }
+            const { displayText, tooltip, isPlaceholder } = deltaAgainstSession(sess, resultEv?.output || "");
             block._bodyEl.classList.remove("interaction-pending");
             block._bodyEl.classList.add(`interaction-status-${status}`);
             if (isPlaceholder) block._bodyEl.classList.add("interaction-pending");
             setInteractionBodyText(block, displayText);
             if (tooltip) block._bodyEl.title = tooltip;
             else block._bodyEl.removeAttribute("title");
-            // Update tracker even when the tail is empty, so a later read
-            // that does add content still slices correctly.
-            sess.lastSeenBuffer = cleanCurr;
         }
         return;
     }
