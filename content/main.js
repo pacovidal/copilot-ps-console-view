@@ -866,8 +866,12 @@ function completeContinuation(sess, kind, block, resultEv) {
             const { displayText, tooltip, isPlaceholder } = deltaAgainstSession(sess, resultEv?.output || "");
             block._bodyEl.classList.remove("interaction-pending");
             block._bodyEl.classList.add(`interaction-status-${status}`);
-            if (isPlaceholder) block._bodyEl.classList.add("interaction-pending");
             setInteractionBodyText(block, displayText);
+            // setInteractionBodyText strips `interaction-pending` as a side
+            // effect (its original purpose was promoting "(reading…)" to real
+            // output). Re-add it AFTER so the dim/italic placeholder style
+            // matches Started's empty-body rendering.
+            if (isPlaceholder) block._bodyEl.classList.add("interaction-pending");
             if (tooltip) block._bodyEl.title = tooltip;
             else block._bodyEl.removeAttribute("title");
         }
