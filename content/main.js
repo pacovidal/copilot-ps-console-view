@@ -305,6 +305,33 @@ function setInteractionBodyText(block, text) {
     body.appendChild(document.createTextNode(text));
 }
 
+// CLI status trailers — `<exited with exit code N>`, `<command started in
+// background with shellId: foo>`, `<command with shellId: foo is still
+// running after Ns. ...>`, `<command with id: foo stopped>`, etc. — are
+// noise inside the displayed output. Strip them and surface the trailer as
+// a tooltip on the body so the lifecycle info is still discoverable.
+function splitCliTrailer(text) {
+    if (typeof text !== "string" || !text) return { body: text || "", tooltip: null };
+    const m = text.match(/\s*<[^>]+>\s*$/);
+    if (!m) return { body: text, tooltip: null };
+    return { body: text.slice(0, m.index), tooltip: m[0].trim() };
+}
+
+// Apply raw tool output to a body element: strip the CLI trailer for
+// display, surface it as a tooltip, and fall back to "(no output)" when
+// nothing useful remains.
+function applyOutputToBody(bodyEl, rawText) {
+    if (!bodyEl) return;
+    const { body, tooltip } = splitCliTrailer(rawText || "");
+    const display = body && body.length ? body : "(no output)";
+    const prompt = bodyEl.querySelector(".prompt");
+    bodyEl.textContent = "";
+    if (prompt) bodyEl.appendChild(prompt);
+    bodyEl.appendChild(document.createTextNode(display));
+    if (tooltip) bodyEl.title = tooltip;
+    else bodyEl.removeAttribute("title");
+}
+
 const INTERACTION_LABELS = {
     start: "Started",
     write: "Sent",
@@ -540,7 +567,7 @@ function upsertResult(ev) {
         wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
         const outputBody = wrap._outputBody;
         outputBody.classList.remove("output-pending");
-        outputBody.textContent = ev.output || "(no output)";
+        applyOutputToBody(outputBody, ev.output);
         if (callId != null) entryByCallId.delete(callId);
         return wrap;
     }
@@ -709,6 +736,7 @@ function ensureFreshSession(shellId, ev) {
         statusTagEl: null,
         durEl: null,
         entryDOM: null,
+        lastSeenBuffer: "",
     };
     sessions.set(shellId, sess);
     sess.entryDOM = renderSessionEntry(sess);
@@ -738,15 +766,24 @@ function completeSessionStart(sess, startBlock, resultEv) {
     }
     if (startBlock && resultEv?.output != null) {
         appendOutputSubBody(startBlock, resultEv.output, status);
+        // Seed the dedup buffer with whatever start captured (sans trailer)
+        // so the first read only shows truly new content.
+        sess.lastSeenBuffer = splitCliTrailer(resultEv.output).body;
     }
 }
 
 // Append an output sub-body to an interaction block and stamp it with the
 // result's status so the colored bar mirrors the paired-entry output style.
+// CLI trailer is stripped for display and exposed as a tooltip. Returns
+// null when the cleaned output is empty (so callers can skip rendering).
 function appendOutputSubBody(block, text, status) {
+    const { body: cleaned, tooltip } = splitCliTrailer(text || "");
+    if (!cleaned && !tooltip) return null;
     const cls = `interaction-body interaction-output interaction-status-${status || "success"}`;
     const body = el("div", { cls });
-    body.textContent = text;
+    body.textContent = cleaned || "(no output)";
+    if (!cleaned) body.classList.add("interaction-pending");
+    if (tooltip) body.title = tooltip;
     block.appendChild(body);
     block._outputEl = body;
     return body;
@@ -786,17 +823,45 @@ function completeContinuation(sess, kind, block, resultEv) {
         // already-shown input in place.
         if (resultEv?.output && resultEv.output.trim()) {
             appendOutputSubBody(block, resultEv.output, status);
+            // Update the dedup buffer — write returns the full session
+            // buffer so far, just like read does.
+            sess.lastSeenBuffer = splitCliTrailer(resultEv.output).body;
         }
         return;
     }
     if (kind === "read") {
         if (block._bodyEl) {
-            // The read body is already output-flavoured (created by
-            // appendInteraction's kind→flavour map); just fill in the text and
-            // tag with the result status so the bar colour matches.
+            const raw = resultEv?.output || "";
+            const { body: cleanCurr, tooltip } = splitCliTrailer(raw);
+            const prev = sess.lastSeenBuffer || "";
+            // The CLI returns the FULL session buffer on every read. If it
+            // strictly extends what we've already shown, display only the
+            // new tail; otherwise show full (the buffer was reset/trimmed).
+            let displayText;
+            let isPlaceholder = false;
+            if (prev && cleanCurr.startsWith(prev)) {
+                const tail = cleanCurr.slice(prev.length);
+                if (tail.replace(/\s/g, "") === "") {
+                    displayText = "(no new output since last read)";
+                    isPlaceholder = true;
+                } else {
+                    displayText = tail;
+                }
+            } else if (cleanCurr) {
+                displayText = cleanCurr;
+            } else {
+                displayText = "(no output)";
+                isPlaceholder = true;
+            }
             block._bodyEl.classList.remove("interaction-pending");
             block._bodyEl.classList.add(`interaction-status-${status}`);
-            setInteractionBodyText(block, resultEv.output || "(no output)");
+            if (isPlaceholder) block._bodyEl.classList.add("interaction-pending");
+            setInteractionBodyText(block, displayText);
+            if (tooltip) block._bodyEl.title = tooltip;
+            else block._bodyEl.removeAttribute("title");
+            // Update tracker even when the tail is empty, so a later read
+            // that does add content still slices correctly.
+            sess.lastSeenBuffer = cleanCurr;
         }
         return;
     }
@@ -804,13 +869,17 @@ function completeContinuation(sess, kind, block, resultEv) {
         if (block._bodyEl) {
             block._bodyEl.classList.remove("interaction-pending");
             block._bodyEl.classList.add(`interaction-status-${status}`);
-            // Stop usually just yields a confirmation; show text if present,
-            // otherwise hide the placeholder body entirely.
-            if (resultEv?.output && resultEv.output.trim()) {
-                setInteractionBodyText(block, resultEv.output);
+            const { body: cleaned, tooltip } = splitCliTrailer(resultEv?.output || "");
+            // Stop usually just yields a confirmation that becomes the
+            // tooltip; with no body content left there's nothing useful to
+            // show, so drop the placeholder body entirely.
+            if (cleaned) {
+                setInteractionBodyText(block, cleaned);
+                if (tooltip) block._bodyEl.title = tooltip;
             } else {
                 block._bodyEl.remove();
                 block._bodyEl = null;
+                if (tooltip) block.title = tooltip;
             }
         }
         setSessionStatus(sess, "stopped", resultEv.timestamp);
@@ -829,7 +898,7 @@ function upsertResultInDOM(wrap, ev) {
     if (wrap._dur) wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
     if (wrap._outputBody) {
         wrap._outputBody.classList.remove("output-pending");
-        wrap._outputBody.textContent = ev.output || "(no output)";
+        applyOutputToBody(wrap._outputBody, ev.output);
     }
 }
 
