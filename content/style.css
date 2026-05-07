@@ -88,6 +88,7 @@ footer #status {
 .entry.result.failure .body { border-left-color: var(--accent-failure); color: var(--accent-failure); }
 .entry.result.rejected .body,
 .entry.result.denied .body { border-left-color: var(--accent-warn); color: var(--accent-warn); }
+.entry.result.unknown .body { border-left-color: var(--fg-dim); color: var(--fg-dim); }
 .entry.result .status-tag {
   display: inline-block; padding: 0 6px; border-radius: 3px;
   font-size: 10px; text-transform: uppercase;
@@ -96,6 +97,7 @@ footer #status {
 .entry.result.failure .status-tag { background: var(--accent-failure); }
 .entry.result.rejected .status-tag,
 .entry.result.denied .status-tag { background: var(--accent-warn); }
+.entry.result.unknown .status-tag { background: var(--fg-dim); }
 .empty { color: var(--fg-dim); font-style: italic; padding: 20px; text-align: center; }
 
 #context-menu,

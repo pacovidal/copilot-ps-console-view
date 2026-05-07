@@ -201,7 +201,10 @@ function resultStatus(toolResult) {
     if (toolResult && typeof toolResult === "object" && typeof toolResult.resultType === "string") {
         return toolResult.resultType;
     }
-    return "success";
+    // The SDK normally provides resultType ("success" | "failure" | "rejected"
+    // | "denied"). If it's missing we don't know what happened — never claim
+    // success, since that would silently misreport failures as green.
+    return "unknown";
 }
 
 const webview = new CopilotWebview({
