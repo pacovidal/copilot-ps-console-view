@@ -356,7 +356,7 @@ function setSessionStatus(sess, status, atTime) {
     sess.entryDOM.classList.remove("pending");
     sess.entryDOM.classList.add(`status-${status}`);
     if (status === "pending") sess.entryDOM.classList.add("pending");
-    if (sess.statusTagEl) sess.statusTagEl.textContent = status;
+    if (sess.statusTagEl) sess.statusTagEl.title = status;
     sess.status = status;
     if (status === "active") ensureDurationTicker();
     if (TERMINAL_STATUSES.has(status) && sess.durEl && sess.endTime == null) {
@@ -378,7 +378,8 @@ function renderSessionEntry(sess) {
     const header = el("div", { cls: "header-line" });
     header.appendChild(el("span", { cls: "chevron", text: "▸" }));
 
-    const statusTag = el("span", { cls: "status-tag", text: "pending" });
+    const statusTag = el("span", { cls: "status-tag" });
+    statusTag.title = "pending";
     header.appendChild(statusTag);
     sess.statusTagEl = statusTag;
 
@@ -505,7 +506,8 @@ function renderPair(ev) {
         header.appendChild(tag);
     }
 
-    const statusTag = el("span", { cls: "status-tag", text: "pending" });
+    const statusTag = el("span", { cls: "status-tag" });
+    statusTag.title = "pending";
     header.appendChild(statusTag);
 
     if (ev.args?.description) {
@@ -563,7 +565,7 @@ function upsertResult(ev) {
         const status = ev.status || "success";
         wrap.classList.remove("pending");
         wrap.classList.add(`status-${status}`);
-        wrap._statusTag.textContent = status;
+        wrap._statusTag.title = status;
         wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
         const outputBody = wrap._outputBody;
         outputBody.classList.remove("output-pending");
@@ -580,7 +582,9 @@ function upsertResult(ev) {
     const orphan = el("div", { cls: `entry pair status-${status} orphan-result` });
     const header = el("div", { cls: "header-line" });
     header.appendChild(el("span", { cls: "chevron", text: "▸" }));
-    header.appendChild(el("span", { cls: "status-tag", text: status }));
+    const statusTag = el("span", { cls: "status-tag" });
+    statusTag.title = status;
+    header.appendChild(statusTag);
     header.appendChild(el("span", { cls: "ts", text: fmtTime(ev.timestamp) }));
     header.addEventListener("click", () => orphan.classList.toggle("collapsed"));
     orphan.appendChild(header);
@@ -906,7 +910,7 @@ function upsertResultInDOM(wrap, ev) {
     const status = ev.status || "success";
     wrap.classList.remove("pending");
     wrap.classList.add(`status-${status}`);
-    if (wrap._statusTag) wrap._statusTag.textContent = status;
+    if (wrap._statusTag) wrap._statusTag.title = status;
     if (wrap._dur) wrap._dur.textContent = fmtDuration(ev.timestamp - wrap._callTs);
     if (wrap._outputBody) {
         wrap._outputBody.classList.remove("output-pending");

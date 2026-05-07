@@ -86,23 +86,31 @@ footer #status {
   user-select: none;
 }
 
-/* Status tag — colour set per-status. */
+/* Status indicator — a small colored circle. Green = healthy
+   (success/active/stopped), red = problematic (failure/rejected/denied/
+   unknown). Pulsing green = pending (call sent, no result yet). The exact
+   status name lives in the title attribute, surfaced on hover. */
 .entry .status-tag {
-  display: inline-block; padding: 0 6px; border-radius: 3px;
-  font-size: 10px; text-transform: uppercase;
-  background: var(--accent-success); color: var(--bg);
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-success);
+  cursor: help;
+  flex-shrink: 0;
+  align-self: center;
 }
-.entry.status-failure .status-tag { background: var(--accent-failure); }
+.entry.status-failure  .status-tag,
 .entry.status-rejected .status-tag,
-.entry.status-denied   .status-tag { background: var(--accent-warn); }
-.entry.status-unknown  .status-tag { background: var(--fg-dim); }
-.entry.pending         .status-tag {
-  background: var(--fg-dim);
+.entry.status-denied   .status-tag,
+.entry.status-unknown  .status-tag { background: var(--accent-failure); }
+.entry.pending .status-tag {
+  background: var(--accent-success);
   animation: pulse-pending 1.5s ease-in-out infinite;
 }
 @keyframes pulse-pending {
   0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
+  50%      { opacity: 0.25; }
 }
 
 /* Body sections (Input + Output). The left-border colour follows the entry
@@ -139,8 +147,6 @@ footer #status {
 .entry .output-pending { color: var(--fg-dim); font-style: italic; }
 
 /* --- Sessions (Tier 3): persistent entries with a transcript ------------ */
-.entry.session.status-active .status-tag { background: var(--accent-success); }
-.entry.session.status-stopped .status-tag { background: var(--fg-dim); }
 .entry .shell-chip {
   font-size: 10px;
   color: var(--fg-dim);
