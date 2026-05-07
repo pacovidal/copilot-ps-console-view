@@ -61,28 +61,37 @@ const PS_TOOLS = new Set([
 const themesBuiltinDir = join(import.meta.dirname, "content", "themes");
 const themesUserDir = process.env.COPILOT_PS_CONSOLE_THEMES_DIR
     || join(import.meta.dirname, "themes");
-// State file: { name: "<theme-name>", mode: "light" | "dark" | "system" }.
+// State file: {
+//   name: "<theme-name>",
+//   mode: "light" | "dark" | "system",
+//   prefs: { autoscroll: bool, wrap: bool, expandNew: bool, showListPowershell: bool }
+// }.
 // Lives inside the user themes dir so the installer's preserve-themes step
 // rescues it on upgrade. `name` is read on page load to restore the user's
 // last theme choice (the webview's per-window WEBVIEW2_USER_DATA_FOLDER is
 // wiped on close, so localStorage is not durable). `mode` is used to set the
 // *native* window theme (titlebar, native chrome) on the next window open.
-const themeStateFile = join(themesUserDir, ".state.json");
+// `prefs` holds the right-click toggle state (auto-scroll, wrap, etc).
+const stateFile = join(themesUserDir, ".state.json");
 
-function readThemeState() {
-    try { return JSON.parse(readFileSync(themeStateFile, "utf8")); }
+function readState() {
+    try { return JSON.parse(readFileSync(stateFile, "utf8")) || {}; }
     catch { return {}; }
 }
 
-function writeThemeState(state) {
+function writeState(state) {
     try {
         mkdirSync(themesUserDir, { recursive: true });
-        writeFileSync(themeStateFile, JSON.stringify(state, null, 2));
+        writeFileSync(stateFile, JSON.stringify(state, null, 2));
     } catch {
         // Best-effort. If the dir is read-only the user gets the page-side
         // theme; only the next-open native chrome won't follow.
     }
 }
+
+// Whitelist of pref keys the page is allowed to persist. Bounds the file
+// against future page-side bugs that might try to write arbitrary keys.
+const VALID_PREF_KEYS = new Set(["autoscroll", "wrap", "expandNew", "showListPowershell"]);
 
 // Scan built-in then user themes; user files of the same name override builtins.
 // Re-scans on every call — drop a .css file in themesUserDir, reopen the picker
@@ -310,7 +319,7 @@ const webview = new CopilotWebview({
     width: 1100,
     height: 700,
     iconPath: join(import.meta.dirname, "content", "terminal-copilot.rgba"),
-    theme: readThemeState().mode || "system",
+    theme: readState().mode || "system",
     callbacks: {
         // Page asks for the full backlog when it (re)connects.
         getHistory: () => history,
@@ -323,7 +332,7 @@ const webview = new CopilotWebview({
         listThemes: () => listThemesImpl(),
         // Returns the persisted theme name (or null if none). Page calls this
         // on startup before falling back to prefers-color-scheme.
-        getInitialTheme: () => readThemeState().name || null,
+        getInitialTheme: () => readState().name || null,
         // Returns {sessionId, summary}. Page calls this on first connect to
         // populate the footer and window title; subsequent updates arrive via
         // window.psConsole.setSessionInfo pushed by pollSessionInfo().
@@ -339,9 +348,27 @@ const webview = new CopilotWebview({
             const c = choice && typeof choice === "object" ? choice : {};
             const name = typeof c.name === "string" ? c.name : null;
             const mode = c.mode === "light" || c.mode === "dark" ? c.mode : "system";
-            writeThemeState({ name, mode });
+            const cur = readState();
+            writeState({ ...cur, name, mode });
             webview.setTheme(mode);
             return { name, mode };
+        },
+        // Returns persisted view-option toggles (or {} if never set). Page
+        // calls this on startup to restore the user's right-click toggle
+        // choices before applying any DOM state.
+        getInitialPrefs: () => {
+            const prefs = readState().prefs;
+            return prefs && typeof prefs === "object" ? prefs : {};
+        },
+        // Page calls this whenever a toggle flips. We merge the partial
+        // update into the existing prefs and persist. Unknown keys and
+        // non-boolean values are ignored.
+        setPref: (key, value) => {
+            if (!VALID_PREF_KEYS.has(key) || typeof value !== "boolean") return false;
+            const cur = readState();
+            const prefs = { ...(cur.prefs || {}), [key]: value };
+            writeState({ ...cur, prefs });
+            return true;
         },
         log: (msg, opts) => session.log(msg, opts),
     },

@@ -17,15 +17,28 @@ let refilling = false;
 const DEFAULT_TITLE = "Copilot PowerShell Console";
 
 // View options (formerly checkboxes; now toggles in the right-click menu).
+// Defaults shown here; the persisted prefs (if any) are merged in by
+// `initPrefs()` before any DOM state is applied.
 const opts = {
     autoscroll: true,
     wrap: false,
     expandNew: false,
     showListPowershell: false,
 };
-// Apply non-default initial state to the DOM on load.
-consoleEl.classList.toggle("wrap", opts.wrap);
-consoleEl.classList.toggle("hide-list", !opts.showListPowershell);
+
+async function initPrefs() {
+    let persisted = null;
+    try { persisted = await copilot.getInitialPrefs(); } catch {}
+    if (persisted && typeof persisted === "object") {
+        for (const key of Object.keys(opts)) {
+            if (typeof persisted[key] === "boolean") opts[key] = persisted[key];
+        }
+    }
+    // Apply hydrated state to the DOM. The TOGGLES `apply` callbacks know
+    // exactly which body classes to flip per option; calling them all here
+    // keeps the DOM in sync without duplicating the wiring.
+    for (const t of TOGGLES) t.apply();
+}
 
 // --- Theme machinery -------------------------------------------------------
 // A theme is a plain CSS file containing one :root {} rule that defines all
@@ -1125,6 +1138,9 @@ contextMenu.addEventListener("click", async (e) => {
         if (t) {
             opts[key] = !opts[key];
             t.apply();
+            // Persist the change so it survives the next webview open.
+            // Best-effort: older extension versions may not expose setPref.
+            copilot.setPref(key, opts[key]).catch(() => {});
         }
     }
     hideContextMenu();
@@ -1172,6 +1188,7 @@ async function loadHistory() {
 }
 
 showEmpty();
+initPrefs();
 loadHistory();
 loadSessionInfo();
 initTheme();
