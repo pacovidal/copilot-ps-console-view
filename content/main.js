@@ -21,10 +21,11 @@ const opts = {
     autoscroll: true,
     wrap: false,
     expandNew: false,
-    showListPowershell: true,
+    showListPowershell: false,
 };
 // Apply non-default initial state to the DOM on load.
 consoleEl.classList.toggle("wrap", opts.wrap);
+consoleEl.classList.toggle("hide-list", !opts.showListPowershell);
 
 // --- Theme machinery -------------------------------------------------------
 // A theme is a plain CSS file containing one :root {} rule that defines all
