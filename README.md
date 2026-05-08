@@ -257,9 +257,9 @@ copilot-ps-console-view/
 └── README.md
 ```
 
-## Credit
+## Thanks
 
-This extension was built using [Copilot WebView Creator](https://github.com/SteveSandersonMS/copilot-webview-creator) 
+This extension was originally built with the help of [Copilot WebView Creator](https://github.com/SteveSandersonMS/copilot-webview-creator) 
 
 ## License
 
