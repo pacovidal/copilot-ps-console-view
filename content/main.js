@@ -706,6 +706,12 @@ function handleResult(ev) {
     if (handler) {
         try { handler(ev); } catch (e) { /* best-effort */ }
         entryByCallId.delete(callId);
+        // The result handler usually grows the existing entry's height
+        // (replacing a "waiting…" placeholder with the actual output, or
+        // appending a write/read body). Re-stick to the bottom so the new
+        // content is visible. Autoscroll on call alone would otherwise leave
+        // us a few pixels above the new bottom.
+        if (opts.autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
         return;
     }
     // No matching call — fall back to a minimal orphan-result entry so the
