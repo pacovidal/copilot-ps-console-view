@@ -208,8 +208,13 @@ function readWorkspaceMeta(workspacePath) {
         // Tiny inline parse — we only need a few top-level scalar keys. Avoid
         // pulling in a YAML dependency. The host writes plain (sometimes
         // quoted) scalars in practice; block scalars are treated as absent.
+        //
+        // For the human-readable session label we read both `summary` (older
+        // CLI versions) and `name` (newer schema; see CLI commit dropping the
+        // duplicated `summary:` field). Whichever is present wins; we surface
+        // it as `summary` to keep the page-side contract stable.
         const out = {};
-        for (const key of ["summary", "cwd", "branch"]) {
+        for (const key of ["summary", "name", "cwd", "branch"]) {
             const m = yaml.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
             if (!m) continue;
             let val = m[1].trim();
@@ -219,6 +224,8 @@ function readWorkspaceMeta(workspacePath) {
             }
             if (val) out[key] = val;
         }
+        if (!out.summary && out.name) out.summary = out.name;
+        delete out.name;
         return out;
     } catch {
         return {};
